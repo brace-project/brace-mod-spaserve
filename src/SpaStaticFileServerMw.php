@@ -16,6 +16,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         "js" => "text/javascript",
         "css" => "text/css",
         "png" => "image/png",
+        "jpg" => "image/jpg",
         "svg" => "image/svg+xml",
         "woff2" => "font/woff2"
     ];
