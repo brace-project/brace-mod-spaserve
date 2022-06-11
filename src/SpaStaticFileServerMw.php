@@ -8,7 +8,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
-class FileServeMw extends BraceAbstractMiddleware
+class SpaStaticFileServerMw extends BraceAbstractMiddleware
 {
 
     const MIME_MAP = [
