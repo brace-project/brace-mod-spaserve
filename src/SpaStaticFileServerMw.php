@@ -25,7 +25,8 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
     public function __construct(
         public PhoreDirectory $rootDir,
         public string $mount = "/static",
-        public string $defaultFile = "main.html"
+        public string $defaultFile = "main.html",
+        public bool $liveReload = false
     ) {
 
     }
@@ -37,6 +38,13 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
     }
 
 
+    protected function inotifyWait() {
+        exec("inotifywait -r -e create --format '%w%f' " . escapeshellarg($this->rootDir), $out, $result);
+        if ($result !== 0) {
+            throw new \Exception("inotify error: " . implode(" ", $out) . " - make sure you have inotify-tools installed");
+        }
+    }
+
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
@@ -44,7 +52,13 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         if ( ! startsWith($path, $this->mount))
             return $handler->handle($request);
 
+        if (isset ($request->getQueryParams()["__brace_inotify_wait"]) && $this->liveReload) {
+            $this->inotifyWait();
+            return $this->app->responseFactory->createResponse();
+        }
+
         $file = substr($path, strlen($this->mount));
+
 
         $data = "";
         if (str_contains($file, ".")) {
@@ -65,8 +79,12 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 );
             }
         } else {
+            $html = $this->rootDir->withRelativePath($this->defaultFile)->assertFile()->get_contents();
+            if ($this->liveReload) {
+                $html .= file_get_contents(__DIR__ . "/../js/livereload.html");
+            }
             return $this->app->responseFactory->createResponseWithBody(
-                $this->rootDir->withRelativePath($this->defaultFile)->assertFile()->get_contents(),
+                $html,
                 200, ["Content-Type" => "text/html"]
             );
         }
