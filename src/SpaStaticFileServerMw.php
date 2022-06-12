@@ -64,7 +64,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         if (str_contains($file, ".")) {
             if (phore_file($file)->getFilename() === "@") {
                 $dir = phore_dir($this->rootDir->withSubPath(phore_file($file)->getDirname()));
-                foreach ($dir->getListSorted("*." . phore_file($file)->getExtension()) as $inludeFile) {
+                foreach ($dir->getListSorted("*." . phore_file($file)->getExtension(), true) as $inludeFile) {
                     $data .= $inludeFile->assertFile()->get_contents();
                     $data .= "\n/* Inluded from file: $inludeFile */\n\n";
                 }
