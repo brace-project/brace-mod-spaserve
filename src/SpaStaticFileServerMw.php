@@ -23,12 +23,12 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
 
     public function __construct(
-        public PhoreDirectory $rootDir,
+        public PhoreDirectory|string $rootDir,
         public string $mount = "/static",
         public string $defaultFile = "main.html",
         public bool $liveReload = false
     ) {
-
+        $this->rootDir = phore_dir($this->rootDir)->assertDirectory();
     }
 
 
