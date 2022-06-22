@@ -12,9 +12,13 @@
         sessionStorage.setItem(BRACE_LIVERELOAD_OFFSET_KEY, window.scrollY);
     });
 
-    let result = await fetch(window.location.href + "?__brace_inotify_wait");
+    let key = "&__brace_inotify_wait";
+    if (window.location.href.indexOf("?") === -1)
+        key = "?" + key;
+
+    let result = await fetch(window.location.href + key);
     if ( ! result.ok) {
-        console.log("Brace SPA: LiveReload error:" + result.text());
+        console.error("Brace SPA: LiveReload error:" + await result.text());
         return;
     }
     window.location.reload();
