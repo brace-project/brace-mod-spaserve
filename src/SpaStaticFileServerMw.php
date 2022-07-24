@@ -39,7 +39,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
 
     protected function inotifyWait() {
-        exec("inotifywait -r -e create --format '%w%f' " . escapeshellarg($this->rootDir), $out, $result);
+        exec("inotifywait -r -q -e create --format '%w%f' " . escapeshellarg($this->rootDir), $out, $result);
         if ($result !== 0) {
             throw new \Exception("inotify error: " . implode(" ", $out) . " - make sure you have inotify-tools installed");
         }
