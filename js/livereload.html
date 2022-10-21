@@ -1,0 +1,31 @@
+<script>
+(async() => {
+    console.warn("Activated brace livereload...")
+    const BRACE_LIVERELOAD_OFFSET_KEY = "__braceLiverealoadOffsetKey";
+    const scrollTop = sessionStorage.getItem(BRACE_LIVERELOAD_OFFSET_KEY);
+    window.addEventListener("DOMContentLoaded", () => {
+        window.setTimeout(() => {
+            document.documentElement.scrollTop =  parseInt(scrollTop);
+        }, 100);
+    })
+    document.addEventListener("scroll", (e)=> {
+        sessionStorage.setItem(BRACE_LIVERELOAD_OFFSET_KEY, window.scrollY);
+    });
+
+    let key = "&__brace_inotify_wait";
+    if (window.location.href.indexOf("?") === -1)
+        key = "?" + key;
+
+    let result = await fetch(window.location.href + key);
+    if ( ! result.ok) {
+        console.error("Brace SPA: LiveReload error:" + await result.text());
+        return;
+    }
+    window.location.reload();
+})();
+</script>
+
+
+
+
+
