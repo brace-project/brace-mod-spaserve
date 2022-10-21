@@ -2,6 +2,8 @@
 
 namespace Brace\SpaServe\Loaders;
 
+use Brace\SpaServe\SpaStaticFileServerMw;
+
 class EsbuildLoader implements SpaServeLoader
 {
 
@@ -15,8 +17,9 @@ class EsbuildLoader implements SpaServeLoader
         // TODO: Implement matchesRoute() method.
     }
 
-    public function getResponse(string $route): ServerResponse
+    public function getResponse(string $route, SpaStaticFileServerMw $middleware): ServerResponse
     {
-        // TODO: Implement getResponse() method.
+
+
     }
 }
