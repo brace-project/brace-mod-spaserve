@@ -3,6 +3,7 @@
 namespace Brace\SpaServe;
 
 use Brace\Core\Base\BraceAbstractMiddleware;
+use Brace\SpaServe\Loaders\SpaServeLoader;
 use Phore\FileSystem\PhoreDirectory;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -26,7 +27,12 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         public PhoreDirectory|string $rootDir,
         public string $mount = "/static",
         public string $defaultFile = "main.html",
-        public bool $liveReload = false
+        public bool $liveReload = false,
+
+        /**
+         * @var SpaServeLoader[]
+         */
+        public $loaders = []
     ) {
         $this->rootDir = phore_dir($this->rootDir)->assertDirectory();
     }
@@ -57,8 +63,16 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
             return $this->app->responseFactory->createResponse();
         }
 
+
+
         $file = substr($path, strlen($this->mount));
 
+        foreach ($this->loaders as $loader) {
+            /* @var $loader SpaServeLoader */
+            if ( $loader->matchesRoute($file)) {
+                return $loader->getResponse($file, $this);
+            }
+        }
 
         $data = "";
         if (str_contains($file, ".")) {
