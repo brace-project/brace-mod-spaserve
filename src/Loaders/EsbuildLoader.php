@@ -42,7 +42,7 @@ class EsbuildLoader implements SpaServeLoader
             $response = "alert('SpoServe Esbuild Loader Error: " . addslashes($result->getSTDERRContents()) . "');";
         }
         if ($result->getSTDERRContents() !== "") {
-            $response = "alert('SpoServe Esbuild Loader Warning: " . addslashes($result->getSTDERRContents()) . "');";
+            $response = "alert(`SpoServe Esbuild Loader Warning: " . addslashes($result->getSTDERRContents()) . "`);";
         }
         $response .= $result->getSTDOUTContents();
         chdir($cwd); // Reset CWD to original
