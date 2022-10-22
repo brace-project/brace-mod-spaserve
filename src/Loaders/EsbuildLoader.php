@@ -8,14 +8,13 @@ use Psr\Http\Message\ResponseInterface;
 class EsbuildLoader implements SpaServeLoader
 {
 
-    private $mountPoint;
-
     public function __construct(
         private string $path,
         private string $script,
         private string $contentType,
         private string $cwd,
-        private bool $minify = false
+        private bool $minify = false,
+        private bool $showWarnings = true
     ) {
 
     }
@@ -41,7 +40,7 @@ class EsbuildLoader implements SpaServeLoader
         if ($result->failed()) {
             $response = "alert('SpoServe Esbuild Loader Error: " . addslashes($result->getSTDERRContents()) . "');";
         }
-        if ($result->getSTDERRContents() !== "") {
+        if ($result->getSTDERRContents() !== "" && $this->showWarnings) {
             $response = "alert(`SpoServe Esbuild Loader Warning: " . addslashes($result->getSTDERRContents()) . "`);";
         }
         $response .= $result->getSTDOUTContents();
