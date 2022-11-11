@@ -38,7 +38,7 @@ class EsbuildLoader implements SpaServeLoader
 
         $response = "";
         if ($result->failed()) {
-            $response = "alert('SpoServe Esbuild Loader Error: " . addslashes($result->getSTDERRContents()) . "');";
+            $response = "alert(`SpoServe Esbuild Loader Error: " . addslashes($result->getSTDERRContents()) . "`);";
         }
         if ($result->getSTDERRContents() !== "" && $this->showWarnings) {
             $response = "alert(`SpoServe Esbuild Loader Warning: " . addslashes($result->getSTDERRContents()) . "`);";
