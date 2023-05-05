@@ -35,8 +35,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         public $loaders = []
     ) {
         $this->rootDir = phore_dir($this->rootDir)->assertDirectory();
-        foreach ($this->loaders as $loader)
-            $loader->setApp($this->app);
+
     }
 
 
@@ -56,6 +55,9 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        foreach ($this->loaders as $loader)
+            $loader->setApp($this->app);
+
         $path = $request->getUri()->getPath();
         if ( ! startsWith($path, $this->mount))
             return $handler->handle($request);
