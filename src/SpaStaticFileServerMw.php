@@ -35,6 +35,8 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         public $loaders = []
     ) {
         $this->rootDir = phore_dir($this->rootDir)->assertDirectory();
+        foreach ($this->loaders as $loader)
+            $loader->setApp($this->app);
     }
 
 
