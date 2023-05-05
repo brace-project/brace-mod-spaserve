@@ -2,6 +2,8 @@
 
 namespace Brace\SpaServe\Loaders;
 
+use Brace\Core\BraceApp;
+use Brace\Core\EnvironmentType;
 use Brace\SpaServe\SpaStaticFileServerMw;
 use Psr\Http\Message\ResponseInterface;
 
@@ -85,7 +87,10 @@ class EsbuildLoader implements SpaServeLoader
             $options .= " --minify ";
 
 
-        $this->updateAutoload();
+        if ($this->app->environmentType === EnvironmentType::DEVELOPMENT) {
+            // Only in development mode, we update the _autoload.ts file
+            $this->updateAutoload();
+        }
 
 
         $proc = phore_proc("esbuild :entrypoint --bundle $options", ["entrypoint" => $this->entrypoint]);
@@ -106,5 +111,22 @@ class EsbuildLoader implements SpaServeLoader
             200,
             ["Content-Type" => $this->contentType]
         );
+    }
+
+    /**
+     * @var BraceApp
+     */
+    private $app;
+
+    /**
+     * Set the App - done by SpaStaticFileServerMw
+     *
+     * @internal
+     * @param BraceApp $app
+     * @return void
+     */
+    public function setApp(BraceApp $app): void
+    {
+        $this->app = $app;
     }
 }
