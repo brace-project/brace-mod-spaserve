@@ -59,6 +59,8 @@ class EsbuildLoader implements SpaServeLoader
         $foundFiles = 0;
         $foundImports = 0;
         foreach (glob($modpath . "/" . $this->autoloadPath) as $file) {
+            if ( ! is_file($file))
+                continue;
             $foundFiles++;
             $data = file_get_contents($file);
             if (preg_match($this->autoloadPreg, $data) === 0)
