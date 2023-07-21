@@ -24,11 +24,25 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
 
     public function __construct(
+        /**
+         * The directory to observe with inotify for changes (autoreload)
+         * @var PhoreDirectory|string
+         */
         public PhoreDirectory|string $rootDir,
+
+        /**
+         * Where to mount the static file server
+         * @var string
+         */
         public string $mount = "/static",
         public string $defaultFile = "main.html",
         public bool $liveReload = false,
 
+        /**
+         * List of Directories to observe for changes
+         * @var array|null
+         */
+        public array|null $observeDirs = null,
         /**
          * @var SpaServeLoader[]
          */
@@ -46,7 +60,12 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
 
     protected function inotifyWait() {
-        exec("inotifywait -r -q -e create --format '%w%f' " . escapeshellarg($this->rootDir), $out, $result);
+        if ($this->observeDirs === null || count($this->observeDirs) === 0)
+            throw new \InvalidArgumentException("Cannot use inotify without observeDir");
+
+        $dirs = array_filter($this->observeDirs, fn($i) => "'" . escapeshellarg($i) . "'");
+
+        exec("inotifywait -r -q -e create --format '%w%f' " . implode(" ", $dirs), $out, $result);
         if ($result !== 0) {
             throw new \Exception("inotify error: " . implode(" ", $out) . " - make sure you have inotify-tools installed");
         }
