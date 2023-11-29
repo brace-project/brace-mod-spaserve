@@ -19,7 +19,37 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         "png" => "image/png",
         "jpg" => "image/jpg",
         "svg" => "image/svg+xml",
-        "woff2" => "font/woff2"
+        "woff2" => "font/woff2",
+        "woff" => "font/woff",
+        "webp" => "image/webp",
+        "json" => "application/json",
+        "txt" => "text/plain",
+        "ico" => "image/x-icon",
+        "map" => "application/json",
+        "ttf" => "font/ttf",
+        "eot" => "application/vnd.ms-fontobject",
+        "otf" => "font/otf",
+        "xml" => "application/xml",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "gz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "rar" => "application/x-rar-compressed",
+        "7z" => "application/x-7z-compressed",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "ogg" => "video/ogg",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        "aac" => "audio/aac",
+        "m4a" => "audio/m4a",
+        "csv" => "text/csv",
+        "ts" => "text/typescript",
+        "md" => "text/markdown",
+        "sh" => "text/x-shellscript",
+
+
     ];
 
 
