@@ -12,7 +12,8 @@ class ProxyLoader implements SpaServeLoader
 
     public function __construct(
         private string $proxyUrl,
-        private string $proxyPath
+        private string $proxyPath,
+        private string $stripPrefix = ""
     ) {
     }
 
@@ -33,7 +34,7 @@ class ProxyLoader implements SpaServeLoader
 
     public function getResponse(string $path, SpaStaticFileServerMw $middleware, ServerRequestInterface $request): ResponseInterface
     {
-        $proxy = new HttpProxy($this->proxyUrl, $this->proxyPath, $this->app->responseFactory);
+        $proxy = new HttpProxy($this->proxyUrl,$this->app->responseFactory, $this->stripPrefix);
         return $proxy->proxyRequest($request);
     }
 }
