@@ -6,6 +6,7 @@ use Brace\Core\BraceApp;
 use Brace\Core\EnvironmentType;
 use Brace\SpaServe\SpaStaticFileServerMw;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 
 class EsbuildLoader implements SpaServeLoader
 {
@@ -79,7 +80,7 @@ class EsbuildLoader implements SpaServeLoader
     }
 
 
-    public function getResponse(string $path, SpaStaticFileServerMw $middleware): ResponseInterface
+    public function getResponse(string $path, SpaStaticFileServerMw $middleware, ServerRequestInterface $request): ResponseInterface
     {
         $cwd = getcwd();
         chdir($this->cwd);

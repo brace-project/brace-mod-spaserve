@@ -123,7 +123,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         foreach ($this->loaders as $loader) {
             /* @var $loader SpaServeLoader */
             if ( $loader->matchesRoute($file)) {
-                return $loader->getResponse($file, $this);
+                return $loader->getResponse($file, $this, $request);
             }
         }
 
