@@ -3,6 +3,7 @@
 namespace Brace\SpaServe;
 
 use Brace\Core\Base\BraceAbstractMiddleware;
+use Brace\SpaServe\Loaders\HttpProxy;
 use Brace\SpaServe\Loaders\SpaServeLoader;
 use Phore\FileSystem\PhoreDirectory;
 use Psr\Http\Message\ResponseInterface;
@@ -65,18 +66,23 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
          * @var string
          */
         public string $mount = "/static",
-        public string $defaultFile = "main.html",
-        public bool $liveReload = false,
+
+
+        public string $indexFile = "index.html",
 
         /**
-         * List of Directories to observe for changes
-         * @var array|null
+         * Redirect all files that cannot be found to the default file (for use in SPA scenarios)
+         *
+         * @var bool
          */
-        public array|null $observeDirs = null,
+        public bool $historyApiFallback = true,
+
         /**
-         * @var SpaServeLoader[]
+         *
+         * @var bool
          */
-        public $loaders = []
+        public bool $developmentMode = false,
+
     ) {
         $this->rootDir = phore_dir($this->rootDir)->assertDirectory();
 
@@ -89,71 +95,46 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
     }
 
 
-    protected function inotifyWait() {
-        if ($this->observeDirs === null || count($this->observeDirs) === 0)
-            throw new \InvalidArgumentException("Cannot use inotify without observeDir");
 
-        $dirs = array_filter($this->observeDirs, fn($i) => "'" . escapeshellarg($i) . "'");
-
-        exec("inotifywait -r -q -e create --format '%w%f' " . implode(" ", $dirs), $out, $result);
-        if ($result !== 0) {
-            throw new \Exception("inotify error: " . implode(" ", $out) . " - make sure you have inotify-tools installed");
-        }
-    }
 
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        foreach ($this->loaders as $loader)
-            $loader->setApp($this->app);
+
 
         $path = $request->getUri()->getPath();
         if ( ! startsWith($path, $this->mount))
             return $handler->handle($request);
 
-        if (isset ($request->getQueryParams()["__brace_inotify_wait"]) && $this->liveReload) {
-            $this->inotifyWait();
-            return $this->app->responseFactory->createResponse();
-        }
 
 
 
         $file = substr($path, strlen($this->mount));
 
-        foreach ($this->loaders as $loader) {
-            /* @var $loader SpaServeLoader */
-            if ( $loader->matchesRoute($file)) {
-                return $loader->getResponse($file, $this, $request);
-            }
+        $rootDir = phore_dir($this->rootDir);
+
+
+        if ($this->developmentMode) {
+            $proxy = new HttpProxy("http://localhost:4000", $this->app->responseFactory, $this->mount);
+            return $proxy->proxyRequest($request);
         }
 
-        $data = "";
-        if (str_contains($file, ".")) {
-            if (phore_file($file)->getFilename() === "@") {
-                $dir = phore_dir($this->rootDir->withSubPath(phore_file($file)->getDirname()));
-                foreach ($dir->getListSorted("*." . phore_file($file)->getExtension(), true) as $inludeFile) {
-                    $data .= $inludeFile->assertFile()->get_contents();
-                    $data .= "\n/* Inluded from file: $inludeFile */\n\n";
-                }
-                return $this->app->responseFactory->createResponseWithBody(
-                    $data,
-                    200, ["Content-Type" => $this->getContentTypeFor($file)]
-                );
-            } else {
-                return $this->app->responseFactory->createResponseWithBody(
-                    $this->rootDir->withRelativePath($file)->assertFile()->get_contents(),
-                    200, ["Content-Type" => $this->getContentTypeFor($file)]
-                );
-            }
-        } else {
-            $html = $this->rootDir->withRelativePath($this->defaultFile)->assertFile()->get_contents();
-            if ($this->liveReload) {
-                $html .= file_get_contents(__DIR__ . "/../js/livereload.html");
-            }
+        $curFile = $rootDir->withRelativePath($file);
+        if ($curFile->exists()) {
             return $this->app->responseFactory->createResponseWithBody(
-                $html,
-                200, ["Content-Type" => "text/html"]
+                $curFile->assertFile()->get_contents(),
+                200, ["Content-Type" => $this->getContentTypeFor($curFile)]
             );
         }
+        if ($this->historyApiFallback) {
+            $defaultFile = $rootDir->withRelativePath($this->indexFile);
+            if ( ! $defaultFile->exists())
+                throw new \InvalidArgumentException("Default file not found: $defaultFile");
+            return $this->app->responseFactory->createResponseWithBody(
+                $defaultFile->assertFile()->get_contents(),
+                200, ["Content-Type" => $this->getContentTypeFor($defaultFile)]
+            );
+        }
+        return $this->app->responseFactory->createResponse(404, "File not found");
     }
 }
