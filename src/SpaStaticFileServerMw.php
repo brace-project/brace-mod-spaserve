@@ -3,6 +3,7 @@
 namespace Brace\SpaServe;
 
 use Brace\Core\Base\BraceAbstractMiddleware;
+use Brace\SpaServe\Helper\FileContentRewriter;
 use Brace\SpaServe\Loaders\HttpProxy;
 use Brace\SpaServe\Loaders\SpaServeLoader;
 use Phore\FileSystem\PhoreDirectory;
@@ -107,6 +108,9 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
             return $handler->handle($request);
 
 
+        $fileContentRewriter = new FileContentRewriter([
+            "%%ROUTE_PREFIX%%" => $this->app->router->getRoutePrefix()
+        ]);
 
 
         $file = substr($path, strlen($this->mount));
@@ -115,14 +119,14 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
 
         if ($this->developmentMode) {
-            $proxy = new HttpProxy("http://localhost:4000", $this->app->responseFactory, $this->mount);
+            $proxy = new HttpProxy("http://localhost:4000", $this->app->responseFactory, $this->mount, $fileContentRewriter);
             return $proxy->proxyRequest($request);
         }
 
         $curFile = $rootDir->withRelativePath($file);
         if ($curFile->exists()) {
             return $this->app->responseFactory->createResponseWithBody(
-                $curFile->assertFile()->get_contents(),
+                $fileContentRewriter->rewrite($curFile->assertFile()->get_contents()),
                 200, ["Content-Type" => $this->getContentTypeFor($curFile)]
             );
         }
@@ -131,7 +135,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
             if ( ! $defaultFile->exists())
                 throw new \InvalidArgumentException("Default file not found: $defaultFile");
             return $this->app->responseFactory->createResponseWithBody(
-                $defaultFile->assertFile()->get_contents(),
+                $fileContentRewriter->rewrite($defaultFile->assertFile()->get_contents()),
                 200, ["Content-Type" => $this->getContentTypeFor($defaultFile)]
             );
         }

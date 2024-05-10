@@ -3,6 +3,7 @@
 namespace Brace\SpaServe\Loaders;
 
 use Brace\Core\BraceResponseFactoryInterface;
+use Brace\SpaServe\Helper\FileContentRewriter;
 use Laminas\Diactoros\Response;
 use Laminas\Diactoros\Response\HtmlResponse;
 use Laminas\Diactoros\Stream;
@@ -18,10 +19,12 @@ class HttpProxy
         private string $proxyUrl,
         private BraceResponseFactoryInterface $responseFactory,
         private string $stripPrefix = "",
+        private FileContentRewriter $fileContentRewriter = new FileContentRewriter([])
     ) {
     }
-
-
+    
+    
+    
     public function proxyRequest(ServerRequestInterface $request): ResponseInterface
     {
         $path = $request->getUri()->getPath();
@@ -76,7 +79,7 @@ class HttpProxy
 
 
         curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($curl, $data) use ($response) {
-            echo $data;
+            echo $this->fileContentRewriter->rewrite($data);
             return strlen($data);
         });
 
@@ -85,7 +88,6 @@ class HttpProxy
         //echo $data;
 
        // fclose($stream);
-        out("finish");
         if (curl_errno($ch)) {
            echo  "SpaServe ProxyLoader: Error:" . curl_error($ch);
            exit(1);
