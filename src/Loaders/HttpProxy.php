@@ -42,7 +42,7 @@ class HttpProxy
         // extract port from url
 
 
-        $proxyUrl = $this->proxyUrl . "/" . $path;
+        $proxyUrl = $this->proxyUrl . "" . $path;
 
 
         $ch = curl_init($proxyUrl);
@@ -50,8 +50,11 @@ class HttpProxy
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $bodyContent);
         curl_setopt($ch, CURLOPT_ENCODING , 'gzip');
-        //curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        //curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
         curl_setopt($ch, CURLOPT_HEADER, false);
+
+
+
 
         $response = new Response();
         //$stream = fopen("php://output", "w+");
@@ -79,13 +82,17 @@ class HttpProxy
             return $len;
         });
 
-
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($curl, $data) use ($response) {
-            echo $this->fileContentRewriter->rewrite($data);
+        $buffer = "";
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($curl, $data) use ($response, &$buffer) {
+            $buffer .= $this->fileContentRewriter->rewrite($data);
             return strlen($data);
         });
 
         $data = curl_exec($ch);
+        $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        header("HTTP/1.1 $statusCode");
+
+        echo $buffer;
         curl_close($ch);
         //echo $data;
 
