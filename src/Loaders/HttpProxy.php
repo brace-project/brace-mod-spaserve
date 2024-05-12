@@ -22,9 +22,9 @@ class HttpProxy
         private FileContentRewriter $fileContentRewriter = new FileContentRewriter([])
     ) {
     }
-    
-    
-    
+
+
+
     public function proxyRequest(ServerRequestInterface $request): ResponseInterface
     {
         $path = $request->getUri()->getPath();
@@ -42,8 +42,10 @@ class HttpProxy
         // extract port from url
 
 
+        $proxyUrl = $this->proxyUrl . "/" . $path;
 
-        $ch = curl_init($this->proxyUrl . $path);
+
+        $ch = curl_init($proxyUrl);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $bodyContent);
@@ -89,7 +91,7 @@ class HttpProxy
 
        // fclose($stream);
         if (curl_errno($ch)) {
-           echo  "SpaServe ProxyLoader: Error:" . curl_error($ch);
+           echo  "SpaServe ProxyLoader Error:" . curl_error($ch) . " (" . curl_errno($ch) . ") - Loading: " . $proxyUrl . "\n";
            exit(1);
         }
 

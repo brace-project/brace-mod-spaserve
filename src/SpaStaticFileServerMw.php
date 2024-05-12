@@ -69,6 +69,8 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         public string $mount = "/static",
 
 
+
+
         public string $indexFile = "index.html",
 
         /**
@@ -84,9 +86,24 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
          */
         public bool $developmentMode = false,
 
+        /**
+         * Exclude paths from static file server. Use fnmatch syntax.
+         * This should be used to exclude api paths from static file server.
+         *
+         * @var array|string[]
+         */
+        public array $exclude = ["/api/*"],
+
     ) {
         $this->rootDir = phore_dir($this->rootDir)->assertDirectory();
 
+        // Must start with /
+        if ( ! str_starts_with($this->mount, "/"))
+            $this->mount = "/".$this->mount;
+
+        // Mutst not end with /
+        if (str_ends_with($this->mount, "/"))
+            $this->mount = substr($this->mount, 0, -1);
     }
 
 
@@ -106,6 +123,12 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         $path = $request->getUri()->getPath();
         if ( ! startsWith($path, $this->mount))
             return $handler->handle($request);
+
+        // Check if path is excluded
+        foreach ($this->exclude as $exclude) {
+            if (fnmatch($exclude, $path))
+                return $handler->handle($request);
+        }
 
 
         $fileContentRewriter = new FileContentRewriter([
