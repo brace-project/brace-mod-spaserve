@@ -25,7 +25,7 @@ class HttpProxy
 
 
 
-    public function proxyRequest(ServerRequestInterface $request): ResponseInterface
+    public function proxyRequest(ServerRequestInterface $request)
     {
         $path = $request->getUri()->getPath();
         if (startsWith($path, $this->stripPrefix))
@@ -61,6 +61,7 @@ class HttpProxy
         curl_setopt($ch, CURLOPT_HEADERFUNCTION, function($curl, $header) use (&$headers) {
             $len = strlen($header);
             $headerArr = explode(':', $header, 2);
+            //out($headerArr);
             if (count($headerArr) < 2) { // ignore invalid headers
                 return $len;
             }
@@ -82,17 +83,21 @@ class HttpProxy
             return $len;
         });
 
-        $buffer = "";
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($curl, $data) use ($response, &$buffer) {
-            $buffer .= $this->fileContentRewriter->rewrite($data);
+
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($curl, $data) use ($response) {
+            echo $this->fileContentRewriter->rewrite($data);
+            flush();
             return strlen($data);
         });
 
         $data = curl_exec($ch);
         $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        header("HTTP/1.1 $statusCode");
+        if (curl_errno($ch) === 7) {
+            // Connection refused. Just return and try to serve the request from file.
+            return null;
+        }
+      
 
-        echo $buffer;
         curl_close($ch);
         //echo $data;
 

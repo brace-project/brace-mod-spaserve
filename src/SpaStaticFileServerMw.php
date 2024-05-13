@@ -121,6 +121,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
 
         $path = $request->getUri()->getPath();
+
         if ( ! startsWith($path, $this->mount))
             return $handler->handle($request);
 
@@ -129,7 +130,6 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
             if (fnmatch($exclude, $path))
                 return $handler->handle($request);
         }
-
 
         $fileContentRewriter = new FileContentRewriter([
             "%%ROUTE_PREFIX%%" => $this->app->router->getRoutePrefix()
@@ -141,18 +141,20 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         $rootDir = phore_dir($this->rootDir);
 
 
+        $curFile = $rootDir->withRelativePath($file)->asFile();
         if ($this->developmentMode) {
             $proxy = new HttpProxy("http://localhost:4000", $this->app->responseFactory, $this->mount, $fileContentRewriter);
-            return $proxy->proxyRequest($request);
+            $proxy->proxyRequest($request); // Will quit here if proxy was successful
         }
-
-        $curFile = $rootDir->withRelativePath($file);
         if ($curFile->exists()) {
+            if ($curFile->isDirectory())
+                $curFile = $curFile->withFileName($this->indexFile);
             return $this->app->responseFactory->createResponseWithBody(
                 $fileContentRewriter->rewrite($curFile->assertFile()->get_contents()),
                 200, ["Content-Type" => $this->getContentTypeFor($curFile)]
             );
         }
+        
         if ($this->historyApiFallback) {
             $defaultFile = $rootDir->withRelativePath($this->indexFile);
             if ( ! $defaultFile->exists())
@@ -162,6 +164,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 200, ["Content-Type" => $this->getContentTypeFor($defaultFile)]
             );
         }
+
         return $this->app->responseFactory->createResponse(404, "File not found");
     }
 }
