@@ -122,6 +122,10 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
         $path = $request->getUri()->getPath();
 
+        // Only process GET requests
+        if ($request->getMethod() !== "GET")
+            return $handler->handle($request);
+        
         if ( ! startsWith($path, $this->mount))
             return $handler->handle($request);
 
