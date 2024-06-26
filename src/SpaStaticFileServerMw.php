@@ -71,6 +71,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
 
 
+
         public string $indexFile = "index.html",
 
         /**
@@ -93,6 +94,8 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
          * @var array|string[]
          */
         public array $exclude = ["/api/*"],
+
+        public string $xFrameOptions = "SAMEORIGIN",
 
     ) {
         $this->rootDir = phore_dir($this->rootDir)->assertDirectory();
@@ -155,7 +158,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 $curFile = $curFile->withFileName($this->indexFile);
             return $this->app->responseFactory->createResponseWithBody(
                 $fileContentRewriter->rewrite($curFile->assertFile()->get_contents()),
-                200, ["Content-Type" => $this->getContentTypeFor($curFile)]
+                200, ["Content-Type" => $this->getContentTypeFor($curFile), "X-Frame-Options" => $this->xFrameOptions]
             );
         }
         
@@ -165,7 +168,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 throw new \InvalidArgumentException("Default file not found: $defaultFile");
             return $this->app->responseFactory->createResponseWithBody(
                 $fileContentRewriter->rewrite($defaultFile->assertFile()->get_contents()),
-                200, ["Content-Type" => $this->getContentTypeFor($defaultFile)]
+                200, ["Content-Type" => $this->getContentTypeFor($defaultFile), "X-Frame-Options" => $this->xFrameOptions]
             );
         }
 
