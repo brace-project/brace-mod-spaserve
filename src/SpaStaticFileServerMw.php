@@ -95,7 +95,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
          */
         public array $exclude = ["/api/*"],
 
-        public string $xFrameOptions = "SAMEORIGIN",
+        public ?string $xFrameOptions = null,
 
     ) {
         $this->rootDir = phore_dir($this->rootDir)->assertDirectory();
@@ -128,7 +128,7 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         // Only process GET requests
         if ($request->getMethod() !== "GET")
             return $handler->handle($request);
-        
+
         if ( ! startsWith($path, $this->mount))
             return $handler->handle($request);
 
@@ -148,6 +148,11 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
         $rootDir = phore_dir($this->rootDir);
 
 
+        $addHeaders = [];
+        if ($this->xFrameOptions !== null)
+            $addHeaders["X-Frame-Options"] = $this->xFrameOptions;
+
+
         $curFile = $rootDir->withRelativePath($file)->asFile();
         if ($this->developmentMode) {
             $proxy = new HttpProxy("http://localhost:4000", $this->app->responseFactory, $this->mount, $fileContentRewriter);
@@ -158,17 +163,17 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 $curFile = $curFile->withFileName($this->indexFile);
             return $this->app->responseFactory->createResponseWithBody(
                 $fileContentRewriter->rewrite($curFile->assertFile()->get_contents()),
-                200, ["Content-Type" => $this->getContentTypeFor($curFile), "X-Frame-Options" => $this->xFrameOptions]
+                200, ["Content-Type" => $this->getContentTypeFor($curFile), ...$addHeaders]
             );
         }
-        
+
         if ($this->historyApiFallback) {
             $defaultFile = $rootDir->withRelativePath($this->indexFile);
             if ( ! $defaultFile->exists())
                 throw new \InvalidArgumentException("Default file not found: $defaultFile");
             return $this->app->responseFactory->createResponseWithBody(
                 $fileContentRewriter->rewrite($defaultFile->assertFile()->get_contents()),
-                200, ["Content-Type" => $this->getContentTypeFor($defaultFile), "X-Frame-Options" => $this->xFrameOptions]
+                200, ["Content-Type" => $this->getContentTypeFor($defaultFile), ...$addHeaders]
             );
         }
 
