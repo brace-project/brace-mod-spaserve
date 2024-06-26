@@ -33,7 +33,10 @@ class HttpProxy
 
         $method = $request->getMethod();
         $headers = [];
+        $skipHeaders = ["host"];
         foreach ($request->getHeaders() as $name => $values) {
+            if (in_array(strtolower($name), $skipHeaders))
+                continue;
             $headers[] = $name . ": " . implode(", ", $values);
         }
         $bodyContent = (string)$request->getBody();
@@ -96,7 +99,7 @@ class HttpProxy
             // Connection refused. Just return and try to serve the request from file.
             return null;
         }
-      
+
 
         curl_close($ch);
         //echo $data;
