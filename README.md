@@ -6,7 +6,7 @@ SPA-Surf does not build JavaScript and does not proxy Vite. Development uses Vit
 
 ## Setup
 
-Configure the mode explicitly from the application environment and create the matching HTML generator:
+Use one `ViteAutoHtml` configuration for development and production. Only the assets that differ between both modes need separate values:
 
 ```php
 use Brace\Core\EnvironmentType;
@@ -15,20 +15,24 @@ use Brace\SpaServe\SpaStaticFileServerMw;
 
 $development = $app->environmentType === EnvironmentType::DEVELOPMENT;
 
-$html = $development
-    ? ViteAutoHtml::development(
-        entrypoint: '/src/main.ts',
-        basePath: '/',
-        meta: ['spa-api-base-url' => '/api'],
-        startElement: 'demo-app',
-    )
-    : ViteAutoHtml::production(
-        basePath: '/',
-        meta: ['spa-api-base-url' => '/api'],
-        css: ['/assets/app.css'],
-        javascript: ['/assets/app.js'],
-        startElement: 'demo-app',
-    );
+$html = new ViteAutoHtml(
+    development: $development,
+    basePath: '/',
+
+    // Production bundle assets. Disabled in development.
+    css: ['/assets/app.css'],
+    javascript: ['/assets/app.js'],
+
+    // Loaded in both development and production.
+    additionalCss: ['/assets/common.css'],
+    additionalJavascript: ['/assets/common.js'],
+
+    // Development replaces the production bundle with Vite.
+    devEntrypoint: '/src/main.ts',
+
+    meta: ['spa-api-base-url' => '/api'],
+    startElement: 'demo-app',
+);
 
 $app->addMiddleware(new SpaStaticFileServerMw(
     bundleDir: __DIR__ . '/../frontend/dist',
@@ -37,9 +41,11 @@ $app->addMiddleware(new SpaStaticFileServerMw(
 ));
 ```
 
-`ViteAutoHtml::development()` adds `/@vite/client` and the configured entrypoint. `ViteAutoHtml::production()` never reads a Vite manifest; production CSS and JavaScript files are supplied directly.
+In production `css` and `javascript` contain the built bundle files. In development these are not loaded; `devViteClient` (default `/@vite/client`) and `devEntrypoint` are loaded instead. `additionalCss` and `additionalJavascript` are always loaded.
 
-Both modes generate runtime meta fields such as:
+`ViteAutoHtml` does not inspect a Vite manifest. Bundle filenames are supplied by the application configuration.
+
+Runtime values are exposed as meta fields:
 
 ```html
 <meta name="spa-base-path" content="/">
