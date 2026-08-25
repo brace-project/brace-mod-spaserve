@@ -7,6 +7,7 @@ namespace Brace\SpaServe;
 use Brace\Core\Base\BraceAbstractMiddleware;
 use Brace\SpaServe\Html\HtmlGenerator;
 use Brace\SpaServe\Html\ViteAutoHtml;
+use Brace\SpaServe\Tools\MimeMap;
 use Phore\FileSystem\PhoreDirectory;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -21,29 +22,6 @@ use Psr\Http\Server\RequestHandlerInterface;
  */
 final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 {
-    private const MIME_MAP = [
-        'html' => 'text/html; charset=utf-8',
-        'js' => 'text/javascript; charset=utf-8',
-        'mjs' => 'text/javascript; charset=utf-8',
-        'css' => 'text/css; charset=utf-8',
-        'json' => 'application/json; charset=utf-8',
-        'map' => 'application/json; charset=utf-8',
-        'svg' => 'image/svg+xml',
-        'png' => 'image/png',
-        'jpg' => 'image/jpeg',
-        'jpeg' => 'image/jpeg',
-        'gif' => 'image/gif',
-        'webp' => 'image/webp',
-        'ico' => 'image/x-icon',
-        'woff' => 'font/woff',
-        'woff2' => 'font/woff2',
-        'ttf' => 'font/ttf',
-        'otf' => 'font/otf',
-        'txt' => 'text/plain; charset=utf-8',
-        'xml' => 'application/xml; charset=utf-8',
-        'pdf' => 'application/pdf',
-    ];
-
     private PhoreDirectory $bundleDir;
     private bool $development;
 
@@ -91,13 +69,10 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         $file = $this->bundleDir->withRelativePath($relativePath);
         if (!$file->exists() || !$file->isFile()) return null;
 
-        $extension = strtolower($file->getExtension());
-        $contentType = self::MIME_MAP[$extension] ?? 'application/octet-stream';
-
         return $this->app->responseFactory->createResponseWithBody(
             $file->get_contents(),
             200,
-            ['Content-Type' => $contentType],
+            ['Content-Type' => MimeMap::fromExtension($file->getExtension())],
         );
     }
 
