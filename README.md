@@ -8,5 +8,5 @@ Module to serve JavaScript based Single Page Apps
 - Supports Workspaces via esbuild
 
 
-##** LiveReload on dev Mode
+## LiveReload in development mode
 
