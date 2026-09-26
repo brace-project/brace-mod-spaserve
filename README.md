@@ -1,99 +1,69 @@
 # brace-mod-spaserve
 
-Small Brace module for serving a Single Page Application and generating typed TypeScript API stubs.
+Brace serves the SPA shell and built assets. In development, Vite sits in front of Brace, serves TypeScript/CSS and HMR, and forwards API requests and navigation to Brace. In production, deploy Vite's `dist` directory alongside Brace.
 
-SPA-Surf does not build JavaScript and does not proxy Vite. Development uses Vite in front of Brace; production serves already-built files from a bundle directory.
+## Development and production
 
-## Setup
-
-Use one `ViteAutoHtml` configuration for development and production. Only the assets that differ between both modes need separate values:
+The application uses one HTML configuration in both modes:
 
 ```php
 use Brace\Core\EnvironmentType;
 use Brace\SpaServe\Html\ViteAutoHtml;
 use Brace\SpaServe\SpaStaticFileServerMw;
 
-$development = $app->environmentType === EnvironmentType::DEVELOPMENT;
-
-$html = new ViteAutoHtml(
-    development: $development,
-    basePath: '/',
-
-    // Production bundle assets. Disabled in development.
-    css: ['/assets/app.css'],
-    javascript: ['/assets/app.js'],
-
-    // Loaded in both development and production.
-    additionalCss: ['/assets/common.css'],
-    additionalJavascript: ['/assets/common.js'],
-
-    // Development replaces the production bundle with Vite.
-    devEntrypoint: '/src/main.ts',
-
-    meta: ['spa-api-base-url' => '/api'],
-    startElement: 'demo-app',
-);
-
 $app->addMiddleware(new SpaStaticFileServerMw(
-    bundleDir: __DIR__ . '/../frontend/dist',
-    html: $html,
-    mount: '/',
+    bundleDir: __DIR__ . '/frontend/dist',
+    html: new ViteAutoHtml(
+        development: $app->environmentType === EnvironmentType::DEVELOPMENT,
+        css: ['/assets/app.css'],
+        javascript: ['/assets/app.js'],
+        devEntrypoint: '/src/main.ts',
+        startElement: 'demo-app',
+    ),
+    excludePaths: ['/api'],
 ));
 ```
 
-In production `css` and `javascript` contain the built bundle files. In development these are not loaded; `devViteClient` (default `/@vite/client`) and `devEntrypoint` are loaded instead. `additionalCss` and `additionalJavascript` are always loaded.
+Run Brace on port 8080 and Vite on port 5173; open the **Vite** URL in the browser. The example in [`examples/demo`](examples/demo) shows its Vite configuration, source entrypoint and `npm run dev` / `npm run build` scripts. The build emits `dist/assets/app.js` and `dist/assets/app.css`; pass the actual asset paths to `ViteAutoHtml` if your build differs. In development the bundle directory need not exist. In production it must exist before Brace starts. Backend routes under `excludePaths` continue to the next middleware. Missing asset paths return 404; navigation paths return the SPA shell.
 
-`ViteAutoHtml` does not inspect a Vite manifest. Bundle filenames are supplied by the application configuration.
+`ViteAutoHtml` also supports `basePath`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startElement`. It emits `/@vite/client` and `devEntrypoint` in development, and the configured CSS/JavaScript bundle in production. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
 
-Runtime values are exposed as meta fields:
+## Typed API stub
 
-```html
-<meta name="spa-base-path" content="/">
-<meta name="spa-api-base-url" content="/api">
-```
-
-Explicit `meta` values override the automatic defaults. `startElement` inserts the custom element that starts the SPA.
-
-## Vite development proxy
-
-A minimal Vite configuration forwards API and SPA navigation requests to Brace:
-
-```ts
-import { defineConfig } from 'vite';
-
-export default defineConfig({
-  server: {
-    proxy: {
-      '/api': 'http://127.0.0.1:8080',
-      '^/(?!@vite|src/)': 'http://127.0.0.1:8080',
-    },
-  },
-});
-```
-
-A complete minimal setup is available in [`examples/demo`](examples/demo).
-
-## TypeScript API generation
-
-`Brace\SpaServe\Codegen\TypeScriptApiStubModule` uses `phore/schema` to inspect PHP callbacks and generates the types and route table consumed by `@trunkjs/api-stub`.
+Register the actual endpoint with Brace and describe the same callback to the generator. `route()` records the client contract; it does **not** register an HTTP route or enforce response validation at runtime.
 
 ```php
-$api = new \Brace\SpaServe\Codegen\TypeScriptApiStubModule(
-    targetFile: __DIR__ . '/../frontend/src/generated-api.ts',
-);
+use Brace\SpaServe\Codegen\TypeScriptApiStubModule;
 
+$callback = [UserController::class, 'get'];
+$app->router->on('GET@/api/users/:userId', $callback);
+
+$api = new TypeScriptApiStubModule(
+    targetFile: __DIR__ . '/frontend/src/generated-api.ts',
+);
 $api->route(
     name: 'User.Get',
     path: '/api/users/{userId}',
     methods: 'GET',
-    callback: [UserController::class, 'get'],
+    callback: $callback,
 );
-
 $api->load();
 ```
 
-The target file can be checked on every application load. It is only written when the generated content actually changed.
+The PHP callback's parameter and return types (including PHPDoc collection types) are read with `phore/schema`. A parameter named in `{braces}` becomes a path parameter, other parameters become query parameters, and `bodyParameter: 'data'` marks a JSON request body. Public DTO properties become TypeScript interfaces. If the generated content has not changed, the writer leaves the file untouched, so Vite does not rebuild it on every PHP request. Generate before `vite build` and whenever the API signature changes during development.
 
-## Utilities
+The generated source imports `createApi` and `ApiRoute` from `@trunkjs/api-stub`. It contains nested TypeScript route names and a compact flat route table for the runtime:
 
-HTML generation lives in `Brace\SpaServe\Html\HtmlGenerator` and `ViteAutoHtml`. Static MIME lookup lives in `Brace\SpaServe\Tools\MimeMap`; unknown extensions use `application/octet-stream`.
+```ts
+import { API, createAPI } from './generated-api';
+
+const user = await API.User.Get.request({
+  params: { userId: 42 },
+  query: { locale: 'de' },
+});
+// user is typed as User.
+
+const remoteAPI = createAPI({ baseUrl: 'https://example.test' });
+```
+
+`API` uses the same origin by default. The generated types provide compile-time guidance; validation of HTTP payloads remains the application's responsibility. Duplicate route names and conflicting DTO short names are rejected during generation.
