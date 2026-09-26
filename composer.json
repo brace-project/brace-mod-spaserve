@@ -12,11 +12,11 @@
         }
     ],
     "require": {
-        "php": ">=8.1",
+        "php": ">=8.3",
         "phore/filesystem": "*",
-        "phore/system": "*"
+        "phore/system": "*",
+        "phore/schema": "*"
     },
-
     "require-dev": {
         "brace/mod-request-laminas": "*",
         "phore/tester": "*"
@@ -25,16 +25,13 @@
         "psr-4": {
             "Brace\\SpaServe\\": "src"
         },
-        "files": [
-        ]
+        "files": []
     },
     "autoload-dev": {
-        "psr-4": {
-        }
+        "psr-4": {}
     },
     "minimum-stability": "dev",
     "extra": {
-        "branch-alias": {
-        }
+        "branch-alias": {}
     }
 }
