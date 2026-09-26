@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
   // Vite is the browser-facing server; Brace listens behind it on port 8080.
   server: {
-    port: 5173,
+    port: 4000,
     strictPort: true,
     proxy: {
       '/api': {
