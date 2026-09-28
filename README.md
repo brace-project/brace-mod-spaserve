@@ -30,11 +30,10 @@ Run Brace on port 8080 and Vite on port 4000; open the **Vite** URL in the brows
 
 ## Typed API stub
 
-Register the actual endpoint with Brace and describe the same callback to the stub module. `route()` records the client contract; it does **not** register an HTTP route or enforce response validation at runtime.
+The stub module is intended to be part of the Brace application. Register the actual endpoint with Brace, describe the same callback to the stub module, then add that module to the app. `route()` records the client contract; it does **not** register an HTTP route or enforce response validation at runtime.
 
 ```php
 use Brace\Command\CommandModule;
-use Brace\SpaServe\Codegen\TypeScriptApiStubCommandModule;
 use Brace\SpaServe\Codegen\TypeScriptApiStubModule;
 
 $app->addModule(new CommandModule());
@@ -44,6 +43,7 @@ $app->router->on('GET@/api/users/:userId', $callback);
 
 $api = new TypeScriptApiStubModule(
     targetFile: __DIR__ . '/frontend/src/generated-api.ts',
+    autoGenerateInDevelopment: true,
 );
 $api->route(
     name: 'User.Get',
@@ -52,19 +52,16 @@ $api->route(
     callback: $callback,
 );
 
-$app->addModule(new TypeScriptApiStubCommandModule(
-    api: $api,
-    autoGenerateInDevelopment: true,
-));
+$app->addModule($api);
 ```
 
-`TypeScriptApiStubCommandModule` always registers the `spa-api-build` command. With `autoGenerateInDevelopment: true`, it also calls the generator whenever the Brace application is loaded in `EnvironmentType::DEVELOPMENT`; setting the flag to `false` disables that automatic path. Production and test environments never auto-generate, but the explicit command remains available for builds.
+When added to Brace, `TypeScriptApiStubModule` always registers the `spa-api-build` command. With `autoGenerateInDevelopment: true`, it also generates when the module is registered and `$app->environmentType === EnvironmentType::DEVELOPMENT`. Setting the flag to `false` disables that automatic path. Production and test environments never auto-generate, while the explicit command remains available for builds.
 
 The PHP callback's parameter and return types (including PHPDoc collection types) are read with `phore/schema`. A parameter named in `{braces}` becomes a path parameter, other parameters become query parameters, and `bodyParameter: 'data'` marks a JSON request body. Public DTO properties become TypeScript interfaces. `GeneratedFileWriter` compares the generated content and only replaces the target file when it changed, so repeated development generation does not trigger Vite HMR or reloads unnecessarily.
 
 ### Lightweight build command
 
-The normal `brace` CLI loads the complete default application through `AppLoader::loadApp()`. If code generation should not bootstrap HTTP middleware, controllers and other application configuration, use a small build entry like [`examples/demo/build-api.php`](examples/demo/build-api.php). It creates only a minimal `BraceApp`, adds `CommandModule`, registers the configured stub module and runs the same `spa-api-build` command.
+The normal `brace` CLI loads the complete default application through `AppLoader::loadApp()`. If code generation should not bootstrap HTTP middleware, controllers and other application configuration, use a small build entry like [`examples/demo/build-api.php`](examples/demo/build-api.php). It creates only a minimal `BraceApp`, adds `CommandModule`, loads the shared API contract, adds the stub module and runs its `spa-api-build` command.
 
 The API contract itself can live in a separate file such as [`examples/demo/api-stub.php`](examples/demo/api-stub.php), so the normal application and the lightweight build command use the same routes and callbacks without loading the complete web application.
 

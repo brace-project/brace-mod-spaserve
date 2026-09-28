@@ -2,7 +2,6 @@
 
 use Brace\Command\CommandModule;
 use Brace\Core\EnvironmentType;
-use Brace\SpaServe\Codegen\TypeScriptApiStubCommandModule;
 use Brace\SpaServe\Html\ViteAutoHtml;
 use Brace\SpaServe\SpaStaticFileServerMw;
 
@@ -12,12 +11,9 @@ $app->addModule(new CommandModule());
 $contract = require __DIR__ . '/api-stub.php';
 $app->router->on('GET@/api/users/:userId', $contract['callback']);
 
-// Set to false to disable automatic generation. The module itself additionally
-// guarantees that automatic generation never runs outside DEVELOPMENT.
-$app->addModule(new TypeScriptApiStubCommandModule(
-    api: $contract['api'],
-    autoGenerateInDevelopment: true,
-));
+// TypeScriptApiStubModule auto-generates only in DEVELOPMENT.
+// Set autoGenerateInDevelopment: false in api-stub.php to disable this path.
+$app->addModule($contract['api']);
 
 // Insert this after the Brace API routes; Vite proxies /api to Brace.
 $html = new ViteAutoHtml(

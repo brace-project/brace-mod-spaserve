@@ -10,6 +10,7 @@ $callback = static function (int $userId, string $locale): string {
 
 $api = new TypeScriptApiStubModule(
     targetFile: __DIR__ . '/src/generated-api.ts',
+    autoGenerateInDevelopment: true,
 );
 $api->route(
     name: 'User.Get',
