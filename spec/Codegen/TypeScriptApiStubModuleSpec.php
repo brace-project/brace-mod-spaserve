@@ -39,10 +39,10 @@ final class TypeScriptApiStubModuleSpec extends ObjectBehavior
     public function it_registers_the_build_command_and_generates_the_stub(): void
     {
         $this->route(
-            name: 'User.Get',
-            path: '/api/users/{userId}',
-            methods: 'GET',
-            callback: static fn (int $userId): string => (string) $userId,
+            'User.Get',
+            '/api/users/{userId}',
+            'GET',
+            static fn (int $userId): string => (string) $userId,
         );
 
         $app = new BraceApp(EnvironmentType::PRODUCTION);
@@ -52,7 +52,7 @@ final class TypeScriptApiStubModuleSpec extends ObjectBehavior
             throw new RuntimeException('The stub module did not register Brace Command.');
         }
 
-        $output = $app->command->runCommand('spa-api-build', returnOutput: true);
+        $output = $app->command->runCommand('spa-api-build', [], true);
 
         if ($output !== 'TypeScript API stub updated.') {
             throw new RuntimeException('The build command did not report an updated stub.');
@@ -66,10 +66,10 @@ final class TypeScriptApiStubModuleSpec extends ObjectBehavior
     public function it_does_not_rewrite_unchanged_generated_output(): void
     {
         $this->route(
-            name: 'User.Get',
-            path: '/api/users/{userId}',
-            methods: 'GET',
-            callback: static fn (int $userId): string => (string) $userId,
+            'User.Get',
+            '/api/users/{userId}',
+            'GET',
+            static fn (int $userId): string => (string) $userId,
         );
 
         $this->load()->shouldReturn(true);
@@ -86,10 +86,10 @@ final class TypeScriptApiStubModuleSpec extends ObjectBehavior
             true,
         );
         $this->route(
-            name: 'User.Get',
-            path: '/api/users/{userId}',
-            methods: 'GET',
-            callback: static fn (int $userId): string => (string) $userId,
+            'User.Get',
+            '/api/users/{userId}',
+            'GET',
+            static fn (int $userId): string => (string) $userId,
         );
 
         $app = new BraceApp(EnvironmentType::DEVELOPMENT);
