@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Brace\SpaServe\Codegen;
 
+use Brace\Command\CommandModule;
+use Brace\Core\BraceApp;
+use Brace\Core\BraceModule;
+use Brace\Core\EnvironmentType;
 use Phore\Schema\Parser\SchemaParser;
 use Phore\Schema\Schema\ClassSchema;
 use Phore\Schema\Schema\Type\ArraySchemaType;
@@ -12,17 +16,38 @@ use Phore\Schema\Schema\Type\IntersectionSchemaType;
 use Phore\Schema\Schema\Type\SchemaType;
 use Phore\Schema\Schema\Type\UnionSchemaType;
 
-final class TypeScriptApiStubModule
+final class TypeScriptApiStubModule implements BraceModule
 {
     /** @var list<array{name:string,path:string,methods:list<string>,callback:callable,bodyParameter:?string}> */
     private array $routes = [];
 
+    /**
+     * Configure TypeScript API generation and Brace CLI integration.
+     *
+     * The module registers its own spa-api-build application command when it is added
+     * to Brace. In development it can additionally generate the configured target file
+     * automatically; unchanged output is not rewritten.
+     *
+     * @param string $targetFile TypeScript file generated from the registered API routes.
+     * @param SchemaParser $schemaParser Parser used to inspect callback parameter and return types.
+     * @param TypeScriptApiStubGenerator $generator Renderer for the generated TypeScript source.
+     * @param GeneratedFileWriter $writer Writer that only replaces the target when content changed.
+     * @param bool $autoGenerateInDevelopment Generate automatically when Brace runs in DEVELOPMENT.
+     * @param string $commandName Brace CLI application command for explicit generation.
+     * @see self::register()
+     * @see self::load()
+     *
+     * @example $app->addModule(new TypeScriptApiStubModule(__DIR__ . '/frontend/src/generated-api.ts'));
+     */
     public function __construct(
         private readonly string $targetFile,
         private readonly SchemaParser $schemaParser = new SchemaParser(),
         private readonly TypeScriptApiStubGenerator $generator = new TypeScriptApiStubGenerator(),
         private readonly GeneratedFileWriter $writer = new GeneratedFileWriter(),
-    ) {}
+        private readonly bool $autoGenerateInDevelopment = true,
+        private readonly string $commandName = 'spa-api-build',
+    ) {
+    }
 
     /** $bodyParameter explicitly marks one callback argument as JSON request body; all other non-path args become query params. */
     public function route(string $name, string $path, string|array $methods, callable $callback, ?string $bodyParameter = null): self
@@ -31,6 +56,47 @@ final class TypeScriptApiStubModule
         if ($methods === []) throw new \InvalidArgumentException('At least one HTTP method is required.');
         $this->routes[] = compact('name', 'path', 'methods', 'callback', 'bodyParameter');
         return $this;
+    }
+
+    /**
+     * Register the API-stub build command and optional development auto-generation.
+     *
+     * Brace Command is added automatically when the application does not already provide it,
+     * so consumers only need to add this module. The registered command is available through
+     * the normal Brace CLI as vendor/bin/brace spa-api-build.
+     *
+     * Automatic generation runs only for DEVELOPMENT and never as a side effect of the CLI
+     * process itself. Set autoGenerateInDevelopment to false to disable it completely.
+     *
+     * @param BraceApp $app Brace application receiving the module.
+     * @return void
+     * @see \Brace\Command\Command::addCommand()
+     * @see self::load()
+     *
+     * @example $app->addModule($api);
+     */
+    public function register(BraceApp $app): void
+    {
+        if (!$app->has('command')) {
+            $app->addModule(new CommandModule());
+        }
+
+        $app->command->addCommand(
+            $this->commandName,
+            function (): void {
+                $changed = $this->load();
+                echo $changed ? 'TypeScript API stub updated.' : 'TypeScript API stub unchanged.';
+            },
+            'Generate the TypeScript API stub',
+        );
+
+        if (
+            $this->autoGenerateInDevelopment
+            && $app->environmentType === EnvironmentType::DEVELOPMENT
+            && PHP_SAPI !== 'cli'
+        ) {
+            $this->load();
+        }
     }
 
     /** Safe to call on every application load. Returns true iff the target file was actually replaced. */

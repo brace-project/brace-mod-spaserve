@@ -1,0 +1,4 @@
+suites:
+  spaserve:
+    namespace: Brace\SpaServe
+    psr4_prefix: Brace\SpaServe

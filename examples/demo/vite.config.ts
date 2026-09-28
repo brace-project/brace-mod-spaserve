@@ -1,7 +1,16 @@
-import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
+import { defineConfig } from 'vite';
+import { run } from 'vite-plugin-run';
 
 export default defineConfig({
+  plugins: [
+    run({
+      name: 'Brace API stub',
+      run: ['../../vendor/bin/brace', 'spa-api-build'],
+      startup: true,
+      build: true,
+    }),
+  ],
   // Vite is the browser-facing server; Brace listens behind it on port 8080.
   server: {
     port: 4000,
