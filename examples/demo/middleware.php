@@ -29,7 +29,7 @@ $html = new ViteAutoHtml(
     javascript: ['/assets/app.js'],
     devEntrypoint: '/src/main.ts',
     meta: ['spa-api-base-url' => '/api'],
-    startElement: 'demo-app',
+    startHtml: '<demo-app><main id="content"></main></demo-app>',
 );
 
 $app->addMiddleware(new SpaStaticFileServerMw(

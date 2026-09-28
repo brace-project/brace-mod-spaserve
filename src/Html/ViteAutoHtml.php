@@ -15,7 +15,7 @@ final class ViteAutoHtml extends HtmlGenerator
      * @param list<string> $javascript
      * @param list<string> $additionalCss
      * @param list<string> $additionalJavascript
-     * @param string|array{tag:string, attributes?:array<string, scalar|null>}|null $startElement
+     * @param string|null $startHtml Trusted application HTML inserted at the start of <body>.
      */
     public function __construct(
         public bool $development,
@@ -26,7 +26,7 @@ final class ViteAutoHtml extends HtmlGenerator
         array $javascript = [],
         array $additionalCss = [],
         array $additionalJavascript = [],
-        string|array|null $startElement = null,
+        ?string $startHtml = null,
         public string $devViteClient = '/@vite/client',
         public ?string $devEntrypoint = '/src/main.ts',
     ) {
@@ -50,7 +50,7 @@ final class ViteAutoHtml extends HtmlGenerator
             ], $meta),
             css: array_map(fn (string $path) => $this->resolvePath($path, $basePath), $resolvedCss),
             javascript: array_map(fn (string $path) => $this->resolvePath($path, $basePath), $resolvedJavascript),
-            startElement: $startElement,
+            startHtml: $startHtml,
         );
     }
 
