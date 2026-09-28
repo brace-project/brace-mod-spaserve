@@ -20,7 +20,8 @@
     },
     "require-dev": {
         "brace/mod-request-laminas": "*",
-        "phore/tester": "*"
+        "phore/tester": "*",
+        "phpspec/phpspec": "^7.5 || ^8.0"
     },
     "autoload": {
         "psr-4": {
@@ -30,6 +31,9 @@
     },
     "autoload-dev": {
         "psr-4": {}
+    },
+    "scripts": {
+        "test": "phpspec run"
     },
     "minimum-stability": "dev",
     "extra": {
