@@ -1,22 +1,16 @@
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { defineConfig, type Plugin } from 'vite';
-
-const demoDir = fileURLToPath(new URL('.', import.meta.url));
-
-const braceApiStub: Plugin = {
-  name: 'brace-api-stub',
-  buildStart() {
-    // Runs once when the Vite dev server starts and before every production build.
-    execFileSync('php', ['build-api.php'], {
-      cwd: demoDir,
-      stdio: 'inherit',
-    });
-  },
-};
+import { defineConfig } from 'vite';
+import { run } from 'vite-plugin-run';
 
 export default defineConfig({
-  plugins: [braceApiStub],
+  plugins: [
+    run({
+      name: 'Brace API stub',
+      run: ['../../vendor/bin/brace', 'spa-api-build'],
+      startup: true,
+      build: true,
+    }),
+  ],
   // Vite is the browser-facing server; Brace listens behind it on port 8080.
   server: {
     port: 4000,
