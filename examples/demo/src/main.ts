@@ -1,4 +1,4 @@
-import { API } from '../../generated-api';
+import { API } from './generated-api';
 import './app.css';
 
 customElements.define('demo-app', class extends HTMLElement {
@@ -7,7 +7,7 @@ customElements.define('demo-app', class extends HTMLElement {
     button.textContent = 'Load user 42';
     button.onclick = async () => {
       const user = await API.User.Get.request({ params: { userId: 42 }, query: { locale: 'de' } });
-      this.textContent = user.name;
+      this.textContent = user;
     };
     this.append(button);
   }

@@ -13,6 +13,7 @@
     ],
     "require": {
         "php": ">=8.3",
+        "brace/command": "*",
         "phore/filesystem": "*",
         "phore/system": "*",
         "phore/schema": "*"
