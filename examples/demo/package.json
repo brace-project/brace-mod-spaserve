@@ -10,6 +10,7 @@
   },
   "devDependencies": {
     "typescript": "*",
-    "vite": "*"
+    "vite": "*",
+    "vite-plugin-run": "^0.9.1"
   }
 }
