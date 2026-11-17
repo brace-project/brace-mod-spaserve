@@ -43,10 +43,48 @@ Run Brace on port 8080 and Vite on port 4000; open the **Vite** URL in the brows
 
 `ViteAutoHtml` also supports `appBasePath`, `apiBaseUrl`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startHtml`. `startHtml` is trusted application HTML and is inserted unchanged at the beginning of `<body>`, before the generated module scripts. It can therefore contain complete nested startup markup instead of describing only one element. It must not contain untrusted user input. ViteAutoHtml emits `/@vite/client` and `devEntrypoint` in development, and the configured CSS/JavaScript bundle in production. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
 
+## Development proxy diagnostics
+
+Vite must handle its development client, internal modules and source entrypoint.
+If these requests reach SPA-Serve in development, the middleware returns HTTP
+500 with this fixed plain-text diagnostic:
+
+```text
+Vite development resource reached SPA-Serve. Check server.proxy in vite.config and open the Vite development URL.
+```
+
+This indicates unexpected development routing: check the URL/port opened in the
+browser and `server.proxy` in `vite.config.ts` or `vite.config.js`. A catch-all
+proxy can incorrectly forward Vite's own requests to PHP. Requests matched by a
+[Vite proxy rule](https://vite.dev/config/server-options#server-proxy) are not
+subsequently transformed by Vite. [HTTP 500][http-500] describes the detected
+configuration problem; SPA-Serve does not perform an upstream request that could
+justify 502.
+
+The reserved paths are `/@vite/client`, `/@vite/env`, `/@id/` and `/@fs/`, both at
+the domain root and under the effective SPA mount. The default HTML generator
+emits `/@vite/client` and `/src/main.ts` at the domain root, even with a `/demo`
+mount. Custom local `devViteClient` and `devEntrypoint` URLs are also recognized
+in development: relative URLs use the mount, while paths starting with `/` retain
+their location. Dot segments in configured URLs follow browser resolution; incoming
+traversal requests remain rejected. Query strings and fragments are ignored for
+the diagnostic route comparison. Full external URLs and protocol-relative URLs
+do not reserve a corresponding local path.
+
+Production returns a generic 404 for the reserved Vite paths. Ordinary source
+paths and custom development configuration do not introduce production routing
+restrictions. Excluded API routes keep their precedence; malformed or private
+paths still receive 404 and unsupported methods 405. Diagnostic responses have
+`nosniff` and `Cache-Control: no-store`; HEAD has no body. No request URL, query,
+header value or local filesystem path is reflected in the Vite diagnostic.
+
+[http-500]: https://www.rfc-editor.org/rfc/rfc9110.html#section-15.6.1
+
 ## Missing assets and HTML fallback
 
-Missing files under `assets/` and missing paths with a file extension always
-return HTTP 404, including requests that accept HTML. A missing stylesheet at
+Except for the development diagnostics above, missing files under `assets/` and
+missing paths with a file extension return HTTP 404, even when HTML is accepted.
+A missing stylesheet at
 `/demo/assets/app.css` receives this short plain-text response:
 
 ```text
@@ -74,7 +112,8 @@ fallback when its quality is higher than HTML's, or tied with an HTML wildcard.
 An equally preferred explicit `text/html` range remains suitable for navigation.
 
 Generated HTML and these 404 responses include `Vary: Accept, Sec-Fetch-Dest`.
-Existing public files and excluded API routes retain their own delivery behavior.
+Public files outside reserved Vite paths and excluded API routes retain their
+own delivery behavior.
 An extensionless request with only `Accept: */*` and no resource destination is
 indistinguishable from a compatible navigation request and can receive HTML;
 asset clients should identify their media type or use an asset URL.

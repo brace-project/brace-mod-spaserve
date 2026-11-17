@@ -1020,6 +1020,507 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         }
     }
 
+    public static function viteInternalRequests(): iterable
+    {
+        // Feste Vite-Endpunkte sind global und unter dem tatsächlichen Mount reserviert.
+        $paths = [
+            '/@vite/client',
+            '/@vite/env',
+            '/@id',
+            '/@id/module',
+            '/@id/@scope/package',
+            '/@id/__x00__virtual-module',
+            '/@fs',
+            '/@fs/workspace/main.ts',
+            '/%40vite/%63lient',
+            '/%40vite/%65nv',
+            '/%40id%2fmodule',
+            '/%40fs/workspace/main.ts',
+            '/@vite/client?token=' . self::SECRET . '&file=%2Fetc%2Fpasswd',
+        ];
+        foreach (['', '/demo'] as $prefix) {
+            foreach (array_unique(['', $prefix]) as $requestPrefix) {
+                foreach ([false, true] as $development) {
+                    foreach (['GET', 'HEAD'] as $method) {
+                        foreach ($paths as $path) {
+                            yield ($prefix ?: '/') . ' -> ' . $requestPrefix . $path
+                                . ($development ? ' dev ' : ' prod ') . $method
+                                => [$prefix, $requestPrefix . $path, $development, $method];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[DataProvider('viteInternalRequests')]
+    public function test_reserved_vite_resources_have_environment_specific_safe_responses(
+        string $prefix,
+        string $path,
+        bool $development,
+        string $method,
+    ): void {
+        $request = new ServerRequest(uri: $path, method: $method, headers: [
+            'Host' => 'attacker.example',
+            'Accept' => 'text/html;q=2',
+            'Sec-Fetch-Dest' => 'script',
+        ]);
+        $response = $this->process($this->middleware($prefix, development: $development), $request);
+        if ($development) {
+            $this->assertViteDiagnostic($response, $method === 'HEAD');
+            return;
+        }
+        $this->assertFailure($response, 404, $method === 'HEAD');
+        self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+        self::assertStringNotContainsString('SPA-Serve Asset Path:', (string) $response->getBody());
+    }
+
+    public static function unsafeVitePaths(): iterable
+    {
+        // Die Vite-Diagnose darf bestehende Pfad- und Geheimnissperren nicht ersetzen.
+        $paths = [
+            '/@fs/../secret.txt',
+            '/@fs/%2e%2e/secret.txt',
+            '/@fs/.env',
+            '/@fs/project/node_modules/package/index.js',
+            '/@fs/project/vendor/package.js',
+            '/@id/.private',
+            '/@id/config.php',
+            '/@id/module%00',
+            '/@id%252fmodule',
+            '/@fs/C:/secret.txt',
+            '/@fs//etc/passwd',
+            '/@fs/%5c%5cnonexistent.invalid/share',
+            '/@fs/%00secret',
+            '/@fs/%GG/secret',
+            "/@fs/\xff",
+        ];
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                foreach ($paths as $index => $path) {
+                    yield 'unsafe Vite ' . $index . ' ' . ($prefix ?: '/') . ($development ? ' dev' : ' prod')
+                        => [$prefix, $prefix . $path, $development];
+                }
+            }
+        }
+    }
+
+    #[DataProvider('unsafeVitePaths')]
+    public function test_vite_candidates_keep_all_path_rejection_guarantees(
+        string $prefix,
+        string $path,
+        bool $development,
+    ): void {
+        $response = $this->process($this->middleware($prefix, development: $development), $this->rawRequest($path));
+        $this->assertFailure($response);
+        self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+        self::assertStringNotContainsString('SPA-Serve Asset Path:', (string) $response->getBody());
+    }
+
+    public function test_vite_resources_do_not_accept_unsupported_http_methods(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                $middleware = $this->middleware($prefix, development: $development);
+                foreach (array_unique(['/@vite/client', $prefix . '/@id/module']) as $path) {
+                    foreach (['POST', 'PUT', 'OPTIONS', 'TRACE'] as $method) {
+                        $response = $this->process($middleware, new ServerRequest(uri: $path, method: $method));
+                        $this->assertFailure($response, 405);
+                        self::assertSame('GET, HEAD', $response->getHeaderLine('Allow'));
+                        self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+                    }
+                }
+            }
+        }
+    }
+
+    public static function generatedViteResourceUrls(): iterable
+    {
+        // Browser normalisieren nur die angegebenen Dot-Segmente vor dem Request.
+        $cases = [
+            'default root URLs' => [
+                '/@vite/client', '/src/main.ts',
+                ['/@vite/client', '/src/main.ts'],
+                ['/@vite/client', '/src/main.ts'],
+            ],
+            'relative URLs' => [
+                'boot/client', 'boot/main.ts',
+                ['{mount}/boot/client', '{mount}/boot/main.ts'],
+                ['{mount}/boot/client', '{mount}/boot/main.ts'],
+            ],
+            'absolute custom URLs' => [
+                '/custom-vite/client', '/custom-src/main.ts',
+                ['/custom-vite/client', '/custom-src/main.ts'],
+                ['/custom-vite/client', '/custom-src/main.ts'],
+            ],
+            'mixed root and relative URLs' => [
+                'boot/client', '/entry/main.ts?build=one#entry',
+                ['{mount}/boot/client', '/entry/main.ts?build=one#entry'],
+                ['{mount}/boot/client', '/entry/main.ts?build=two'],
+            ],
+            'encoded relative URLs and suffixes' => [
+                'boot/%63lient?token=' . self::SECRET . '#client', 'boot/main%2Ets?build=one#entry',
+                ['{mount}/boot/%63lient?token=' . self::SECRET . '#client', '{mount}/boot/main%2Ets?build=one#entry'],
+                ['{mount}/boot/%63lient?token=' . self::SECRET, '{mount}/boot/main.ts?build=two'],
+            ],
+            'relative dot segment' => [
+                'boot/client', './src/main.ts',
+                ['{mount}/boot/client', '{mount}/./src/main.ts'],
+                ['{mount}/boot/client', '{mount}/src/main.ts'],
+            ],
+            'relative parent segment' => [
+                'boot/client', '../boot.ts',
+                ['{mount}/boot/client', '{mount}/../boot.ts'],
+                ['{mount}/boot/client', '/boot.ts'],
+            ],
+            'absolute dot segment' => [
+                'boot/client', '/demo/./boot.ts',
+                ['{mount}/boot/client', '/demo/./boot.ts'],
+                ['{mount}/boot/client', '/demo/boot.ts'],
+            ],
+            'null entrypoint' => [
+                'boot/client', null,
+                ['{mount}/boot/client'],
+                ['{mount}/boot/client'],
+            ],
+        ];
+        foreach (['', '/demo'] as $prefix) {
+            foreach ($cases as $name => [$client, $entrypoint, $emitted, $requests]) {
+                $resolve = static fn (string $value): string => str_replace('{mount}', $prefix, $value);
+                yield $name . ' ' . ($prefix ?: '/')
+                    => [$prefix, $client, $entrypoint, array_map($resolve, $emitted), array_map($resolve, $requests)];
+            }
+        }
+    }
+
+    #[DataProvider('generatedViteResourceUrls')]
+    public function test_custom_vite_diagnostics_match_the_script_urls_actually_generated(
+        string $prefix,
+        string $client,
+        ?string $entrypoint,
+        array $emitted,
+        array $requests,
+    ): void {
+        $html = new ViteAutoHtml(
+            development: true,
+            devViteClient: $client,
+            devEntrypoint: $entrypoint,
+        );
+        $middleware = $this->middleware($prefix, development: true, html: $html);
+        self::assertSame($emitted, $html->javascript);
+
+        // Die öffentliche HTML-Ausgabe bleibt die Referenz für angeforderte Ressourcen.
+        $document = new \DOMDocument();
+        self::assertTrue($document->loadHTML($html->render()));
+        $actualSources = [];
+        foreach ($document->getElementsByTagName('script') as $script) {
+            $actualSources[] = $script->getAttribute('src');
+        }
+        self::assertSame($emitted, $actualSources);
+        foreach ($requests as $path) {
+            foreach (['GET', 'HEAD'] as $method) {
+                $response = $this->process($middleware, new ServerRequest(uri: $path, method: $method));
+                $this->assertViteDiagnostic($response, $method === 'HEAD');
+            }
+        }
+    }
+
+    public function test_custom_config_normalization_never_permits_raw_request_traversal(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            $html = new ViteAutoHtml(development: true, devViteClient: '', devEntrypoint: './src/main.ts');
+            $middleware = $this->middleware($prefix, development: true, html: $html);
+            foreach (['/./src/main.ts', '/../src/main.ts', '/%2e/src/main.ts', '/%2e%2e/src/main.ts'] as $path) {
+                $response = $this->process($middleware, $this->rawRequest($prefix . $path));
+                $this->assertFailure($response);
+                self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+            }
+        }
+    }
+
+    public function test_custom_vite_matching_preserves_absolute_and_relative_url_boundaries(): void
+    {
+        $relative = new ViteAutoHtml(
+            development: true,
+            devViteClient: 'boot/client',
+            devEntrypoint: 'boot/entry',
+            startHtml: '<div>' . self::SHELL . '</div>',
+        );
+        $middleware = $this->middleware('/demo', development: true, html: $relative);
+        self::assertSame(['/demo/boot/client', '/demo/boot/entry'], $relative->javascript);
+        foreach (['/boot/client', '/boot/entry'] as $path) {
+            $this->assertFailure($this->process($middleware, new ServerRequest(uri: $path)));
+        }
+        foreach (['/demo/boot/client-extra', '/demo/boot/client/extra', '/demo/boot/entry-extra'] as $path) {
+            $response = $this->process($middleware, new ServerRequest(uri: $path));
+            self::assertSame(200, $response->getStatusCode());
+            self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+        }
+
+        // Root-absolute Konfiguration erzeugt keinen zusätzlichen Mount-Alias.
+        $absolute = new ViteAutoHtml(
+            development: true,
+            devViteClient: '/absolute-client',
+            devEntrypoint: '/absolute-entry',
+            startHtml: '<div>' . self::SHELL . '</div>',
+        );
+        $middleware = $this->middleware('/demo', development: true, html: $absolute);
+        self::assertSame(['/absolute-client', '/absolute-entry'], $absolute->javascript);
+        foreach (['/demo/absolute-client', '/demo/absolute-entry'] as $path) {
+            $response = $this->process($middleware, new ServerRequest(uri: $path));
+            self::assertSame(200, $response->getStatusCode());
+            self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+        }
+    }
+
+    public function test_encoded_configuration_separators_do_not_claim_an_unrelated_normalized_path(): void
+    {
+        $html = new ViteAutoHtml(
+            development: true,
+            devViteClient: '',
+            devEntrypoint: '/demo/a%2F..%2Fb.js',
+        );
+        $middleware = $this->middleware('/demo', development: true, html: $html);
+        self::assertContains('/demo/a%2F..%2Fb.js', $html->javascript);
+        foreach (['/demo/b.js', '/demo/a%2F..%2Fb.js'] as $path) {
+            $response = $this->process($middleware, new ServerRequest(uri: $path));
+            $this->assertFailure($response);
+            self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+        }
+    }
+
+    public function test_scheme_like_relative_configuration_does_not_claim_a_different_local_route(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            $html = new ViteAutoHtml(
+                development: true,
+                devViteClient: '',
+                devEntrypoint: 'data:text/javascript,hello',
+                startHtml: '<div>' . self::SHELL . '</div>',
+            );
+            $middleware = $this->middleware($prefix, development: true, html: $html);
+            self::assertContains($prefix . '/data:text/javascript,hello', $html->javascript);
+            $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/text/javascript,hello'));
+            self::assertSame(200, $response->getStatusCode());
+            self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+
+            $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/data:text/javascript,hello'));
+            $this->assertFailure($response);
+            self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+        }
+    }
+
+    public function test_controls_in_configuration_do_not_create_underscore_alias_routes(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            $configured = $prefix . "/boot\0entry";
+            $html = new ViteAutoHtml(
+                development: true,
+                devViteClient: '',
+                devEntrypoint: $configured,
+                startHtml: '<div>' . self::SHELL . '</div>',
+            );
+            $middleware = $this->middleware($prefix, development: true, html: $html);
+            self::assertContains($configured, $html->javascript);
+            $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/boot_entry'));
+            self::assertSame(200, $response->getStatusCode());
+            self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+            $this->assertFailure($this->process($middleware, $this->rawRequest($configured)));
+        }
+    }
+
+    public function test_external_custom_urls_never_claim_matching_local_routes(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            foreach (['https://cdn.invalid', '//cdn.invalid', 'custom+vite://cdn.invalid'] as $origin) {
+                $html = new ViteAutoHtml(
+                    development: true,
+                    devViteClient: $origin . '/remote/client',
+                    devEntrypoint: $origin . '/remote/entry',
+                    startHtml: '<div>' . self::SHELL . '</div>',
+                );
+                $middleware = $this->middleware($prefix, development: true, html: $html);
+                self::assertSame([$origin . '/remote/client', $origin . '/remote/entry'], $html->javascript);
+                foreach (['remote/client', 'remote/entry'] as $path) {
+                    $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/' . $path));
+                    self::assertSame(200, $response->getStatusCode());
+                    self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+                }
+            }
+        }
+    }
+
+    public function test_empty_custom_resource_urls_do_not_claim_navigation_or_src_routes(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([null, ''] as $entrypoint) {
+                $html = new ViteAutoHtml(
+                    development: true,
+                    devViteClient: '',
+                    devEntrypoint: $entrypoint,
+                    startHtml: '<div>' . self::SHELL . '</div>',
+                );
+                $middleware = $this->middleware($prefix, development: true, html: $html);
+                self::assertSame($entrypoint === null ? [''] : ['', ''], $html->javascript);
+                $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/'));
+                self::assertSame(200, $response->getStatusCode());
+                self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+                $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/src/main.ts'));
+                $this->assertFailure($response);
+                self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+            }
+        }
+    }
+
+    public function test_vite_near_matches_keep_the_existing_navigation_and_asset_policy(): void
+    {
+        $cases = [
+            ['@vite/client-extra', 200],
+            ['@vite/client/extra', 200],
+            ['@vite/env-extra', 200],
+            ['@id-other/package', 200],
+            ['@fs-other/package', 200],
+            ['src/other', 200],
+            ['src/other.ts', 404],
+        ];
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                foreach ($cases as [$path, $status]) {
+                    $response = $this->request($prefix, $path, development: $development);
+                    self::assertSame($status, $response->getStatusCode());
+                    if ($status === 200) {
+                        self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+                    } else {
+                        $this->assertFailure($response);
+                    }
+                    self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+                }
+            }
+        }
+        $response = $this->process(
+            $this->middleware('/demo', development: true),
+            new ServerRequest(uri: '/demo-other/@vite/client'),
+        );
+        $this->assertFailure($response);
+    }
+
+    public function test_production_never_serves_reserved_vite_files_but_keeps_normal_sources_public(): void
+    {
+        foreach (['@vite/client', '@vite/env', '@id/module', '@fs/workspace/main.ts'] as $path) {
+            $this->writeBundleFile($path, self::SECRET);
+        }
+        $this->writeBundleFile('src/main.ts', self::PUBLIC_JS);
+        $this->writeBundleFile('boot/client', self::PUBLIC_JS);
+
+        foreach (['', '/demo'] as $prefix) {
+            $html = new ViteAutoHtml(
+                development: false,
+                devViteClient: 'boot/client',
+                devEntrypoint: 'src/main.ts',
+            );
+            $middleware = $this->middleware($prefix, html: $html);
+            foreach (['@vite/client', '@vite/env', '@id/module', '@fs/workspace/main.ts'] as $path) {
+                $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/' . $path));
+                $this->assertFailure($response);
+                self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+            }
+            foreach (['src/main.ts', 'boot/client'] as $path) {
+                $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/' . $path));
+                self::assertSame(200, $response->getStatusCode());
+                self::assertSame(self::PUBLIC_JS, (string) $response->getBody());
+            }
+        }
+    }
+
+    public function test_vite_diagnosis_precedes_file_access_html_rendering_and_negotiation(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            $html = new ViteAutoHtml(development: true);
+            $middleware = $this->middleware(
+                $prefix,
+                development: true,
+                html: $html,
+                bundleDir: $this->root . '/missing-development-bundle',
+            );
+            $probe = new class {
+                public bool $rendered = false;
+
+                public function __toString(): string
+                {
+                    $this->rendered = true;
+                    throw new \RuntimeException('Vite requests must not render the shell.');
+                }
+            };
+            $html->meta['render-sentinel'] = $probe;
+            foreach (['GET', 'HEAD'] as $method) {
+                $request = $this->headerRequest('/@vite/client?token=' . self::SECRET, [
+                    'Accept' => "text/html\0",
+                    'Sec-Fetch-Dest' => 'unknown',
+                ], $method);
+                $this->assertViteDiagnostic($this->process($middleware, $request), $method === 'HEAD');
+                self::assertFalse($probe->rendered);
+            }
+        }
+
+        // Auch die Produktionssperre greift vor einem mittlerweile verlorenen Bundle.
+        $production = $this->middleware('/demo');
+        self::assertTrue(rename($this->root . '/dist', $this->root . '/offline-vite-dist'));
+        clearstatcache(true);
+        $this->assertFailure($this->process($production, new ServerRequest(uri: '/@vite/client')));
+    }
+
+    public function test_excluded_api_requests_take_priority_over_vite_resource_detection(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            $html = new ViteAutoHtml(development: true, devEntrypoint: 'api/entry.ts');
+            $middleware = $this->middleware($prefix, development: true, html: $html);
+            $request = new ServerRequest(uri: $prefix . '/api/entry.ts', method: 'POST');
+            $handler = new class implements RequestHandlerInterface {
+                public ?ServerRequestInterface $received = null;
+
+                public function handle(ServerRequestInterface $request): ResponseInterface
+                {
+                    $this->received = $request;
+                    return new EmptyResponse(418);
+                }
+            };
+            $response = $middleware->process($request, $handler);
+            self::assertSame($request, $handler->received);
+            self::assertSame(418, $response->getStatusCode());
+
+            // Ein explizit ausgeschlossener API-Mount hat auch vor festen Internals Vorrang.
+            $api = $this->middleware('/api', development: true);
+            $request = new ServerRequest(uri: '/api/@vite/client', method: 'POST');
+            $response = $api->process($request, $handler);
+            self::assertSame($request, $handler->received);
+            self::assertSame(418, $response->getStatusCode());
+        }
+    }
+
+    public function test_vite_detection_uses_the_effective_mount_without_weakening_private_paths(): void
+    {
+        $middleware = $this->middleware('/demo', development: true, mount: '/vendor');
+        foreach (['/@vite/client', '/vendor/@vite/client'] as $path) {
+            $this->assertViteDiagnostic($this->process($middleware, new ServerRequest(uri: $path)));
+        }
+        foreach (['/demo/@vite/client', '/vendor/@fs/project/node_modules/package.js', '/@fs/project/vendor/package.js'] as $path) {
+            $response = $this->process($middleware, new ServerRequest(uri: $path));
+            $this->assertFailure($response);
+            self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
+        }
+    }
+
+    private function assertViteDiagnostic(ResponseInterface $response, bool $head = false): void
+    {
+        $this->assertFailure($response, 500, $head);
+        if (!$head) {
+            self::assertSame(
+                'Vite development resource reached SPA-Serve. Check server.proxy in vite.config and open the Vite development URL.',
+                (string) $response->getBody(),
+            );
+        }
+    }
+
     private function headerRequest(string $path, array $headers, string $method = 'GET'): ServerRequestInterface
     {
         // Fehlerhafte Adapter-Header unverändert prüfen, auch wenn PSR-7 sie ablehnen würde.

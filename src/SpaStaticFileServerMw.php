@@ -25,6 +25,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
     private const MAX_ACCEPT_BYTES = 8192;
     private const MAX_ACCEPT_RANGES = 64;
     private const FALLBACK_VARY = 'Accept, Sec-Fetch-Dest';
+    private const VITE_PROXY_ERROR = 'Vite development resource reached SPA-Serve. '
+        . 'Check server.proxy in vite.config and open the Vite development URL.';
 
     private ?PhoreDirectory $bundleDir = null;
     private ?string $bundleRoot = null;
@@ -108,6 +110,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      * private paths return 404, unsupported methods 405 and operational errors
      * 500. Missing assets name only the encoded public URL directory, never a
      * filesystem path. HTML fallback respects Accept and the fetch destination.
+     * Misrouted Vite resources return a development-only proxy diagnostic (500)
+     * before file access; reserved Vite endpoints return 404 in production.
      * Excluded requests are passed to the handler unchanged.
      *
      * @param ServerRequestInterface $request Request from the HTTP adapter.
@@ -134,16 +138,24 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 return $handler->handle($request);
             }
         }
-        if (!$this->isMountedPath($path)) {
+        $mountedPath = $this->isMountedPath($path);
+        $viteResource = $this->isViteResourcePath($path);
+        if (!$mountedPath && !$viteResource) {
             return $this->errorResponse($request, 404, 'Requested path is outside the configured SPA URL prefix.');
         }
         if (!in_array($request->getMethod(), ['GET', 'HEAD'], true)) {
             return $this->errorResponse($request, 405, 'SPA delivery only supports GET and HEAD.', ['Allow' => 'GET, HEAD']);
         }
 
-        $relativePath = $this->relativePath($path);
+        $relativePath = $mountedPath ? $this->relativePath($path) : ltrim($path, '/');
         if (!$this->isPublicAssetPath($relativePath)) {
             return $this->errorResponse($request, 404, 'SPA asset not found.');
+        }
+        if ($viteResource) {
+            // Vite muss diese Requests selbst bedienen, auch außerhalb des Mounts.
+            return $this->development
+                ? $this->errorResponse($request, 500, self::VITE_PROXY_ERROR)
+                : $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
         // Nur reguläre öffentliche Dateien aus dem gebundenen Bundle lesen.
@@ -190,6 +202,73 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             200,
             ['Content-Type' => 'text/html; charset=utf-8', 'Vary' => self::FALLBACK_VARY],
         );
+    }
+
+    private function isViteResourcePath(string $path): bool
+    {
+        // Standard-URLs können global oder unter Vites konfiguriertem Base liegen.
+        $candidates = [$path];
+        if ($this->mount !== '/' && $this->isMountedPath($path)) {
+            $candidates[] = '/' . $this->relativePath($path);
+        }
+        foreach ($candidates as $candidate) {
+            if (
+                in_array($candidate, ['/@vite/client', '/@vite/env', '/@id', '/@fs'], true)
+                || str_starts_with($candidate, '/@id/')
+                || str_starts_with($candidate, '/@fs/')
+            ) {
+                return true;
+            }
+        }
+
+        if (!$this->development || !($this->html instanceof ViteAutoHtml)) {
+            return false;
+        }
+        foreach ([$this->html->devViteClient, $this->html->devEntrypoint] as $url) {
+            if ($url !== null && $this->resolveDevelopmentPath($url) === $path) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function resolveDevelopmentPath(string $url): ?string
+    {
+        if (
+            $url === ''
+            || str_starts_with($url, '//')
+            || preg_match('#^[a-z][a-z0-9+.-]*://#i', $url)
+            || preg_match('/[\x00-\x1f\x7f]/', $url)
+        ) {
+            return null;
+        }
+        // Wie ViteAutoHtml: relative URLs am Mount auflösen, absolute unverändert.
+        if (!str_starts_with($url, '/')) {
+            $url = rtrim($this->mount, '/') . '/' . $url;
+        }
+        $path = parse_url($url, PHP_URL_PATH);
+        if (!is_string($path) || $path === '') {
+            return null;
+        }
+
+        // Browser kürzen Dot-Segmente in konfigurierten URLs vor dem Request.
+        // Eingehende Request-Pfade durchlaufen weiterhin die strikte Validierung.
+        $segments = explode('/', substr($path, 1));
+        $resolved = [];
+        foreach ($segments as $index => $segment) {
+            $dotSegment = rawurldecode($segment);
+            if ($dotSegment === '.' || $dotSegment === '..') {
+                if ($dotSegment === '..') {
+                    array_pop($resolved);
+                }
+                if ($index === array_key_last($segments)) {
+                    $resolved[] = '';
+                }
+                continue;
+            }
+            $resolved[] = $segment;
+        }
+        return $this->decodeRequestPath('/' . implode('/', $resolved));
     }
 
     private function tryStaticFile(string $relativePath, ServerRequestInterface $request): ?ResponseInterface
