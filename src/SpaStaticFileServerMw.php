@@ -10,6 +10,9 @@ use Brace\Core\EnvironmentType;
 use Brace\SpaServe\Html\HtmlGenerator;
 use Brace\SpaServe\Html\ViteAutoHtml;
 use Brace\SpaServe\Tools\MimeMap;
+use Phore\FileSystem\Exception\FilesystemException;
+use Phore\FileSystem\Exception\FilesystemPolicyViolationException;
+use Phore\FileSystem\Exception\PathOutOfBoundsException;
 use Phore\FileSystem\PhoreDirectory;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -18,7 +21,10 @@ use Psr\Http\Server\RequestHandlerInterface;
 /** Serves the SPA shell and, in production, the files emitted by Vite. */
 final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 {
+    private const MAX_PATH_BYTES = 8192;
+
     private ?PhoreDirectory $bundleDir = null;
+    private ?string $bundleRoot = null;
     private bool $development = false;
     private PhoreDirectory|string $configuredBundleDir;
     private ?bool $configuredDevelopment;
@@ -52,13 +58,36 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         $this->configuredDevelopment = $html instanceof ViteAutoHtml ? $html->development : false;
     }
 
+    /**
+     * Bind application URLs and the production bundle's filesystem boundary.
+     *
+     * A missing production bundle fails during application bootstrap. Runtime
+     * requests translate filesystem errors into responses without diagnostics.
+     * The bundle must be trusted and must not be writable by untrusted actors.
+     *
+     * @param BraceApp $app Application supplying the response factory and mount.
+     * @throws FilesystemException If the production bundle cannot be resolved.
+     * @see BraceAbstractMiddleware::_setApp()
+     * @example $middleware->_setApp($app);
+     */
     public function _setApp(BraceApp $app): void
     {
         parent::_setApp($app);
         $this->mount = $this->normalizeMount($this->configuredMount ?? $app->url_prefix);
         $this->development = $this->configuredDevelopment
             ?? ($app->environmentType === EnvironmentType::DEVELOPMENT);
-        $this->bundleDir = $this->development ? null : phore_dir($this->configuredBundleDir)->assertDirectory();
+        // Die Root-Policy wird an alle späteren Dateioperationen vererbt.
+        $this->bundleDir = null;
+        $this->bundleRoot = null;
+        if (!$this->development) {
+            $directory = phore_dir($this->configuredBundleDir)->assertDirectory();
+            $root = realpath((string) $directory);
+            if ($root === false) {
+                throw new FilesystemException("Cannot resolve SPA bundle directory '$directory'.");
+            }
+            $this->bundleRoot = $root;
+            $this->bundleDir = phore_dir($directory, ['rootDir' => $root]);
+        }
         if ($this->html instanceof ViteAutoHtml) {
             $this->html->development = $this->development;
             $this->html->setApplicationUrls(
@@ -69,9 +98,32 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         $this->html->meta['app-env'] = $app->environmentType->value;
     }
 
+    /**
+     * Serve a validated GET/HEAD asset or SPA route, or delegate an excluded API.
+     *
+     * URL decoding precedes every routing and filesystem decision. Invalid or
+     * private paths return 404, unsupported methods 405 and operational errors
+     * 500. Error bodies never include request input or filesystem diagnostics.
+     * Excluded requests are passed to the handler unchanged.
+     *
+     * @param ServerRequestInterface $request Request from the HTTP adapter.
+     * @param RequestHandlerInterface $handler Handler for excluded API routes.
+     * @return ResponseInterface A module response or the delegated response.
+     * @see RequestHandlerInterface::handle()
+     * @example $response = $middleware->process($request, $next);
+     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        $path = $request->getUri()->getPath();
+        // Auch fehlerhafte Daten eines vorgeschalteten HTTP-Adapters ablehnen.
+        $rawPath = $request->getUri()->getPath();
+        if (strlen($rawPath) > self::MAX_PATH_BYTES) {
+            return $this->errorResponse($request, 414, 'SPA request path is too long.');
+        }
+        $path = $this->decodeRequestPath($rawPath);
+        if ($path === null) {
+            return $this->errorResponse($request, 404, 'Invalid or disallowed SPA path.');
+        }
+
         foreach ($this->excludePaths as $excludePath) {
             $excludePath = $this->resolveExcludedPath($excludePath);
             if ($path === $excludePath || str_starts_with($path, $excludePath . '/')) {
@@ -79,58 +131,154 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             }
         }
         if (!$this->isMountedPath($path)) {
-            return $this->app->responseFactory->createResponseWithBody(
-                sprintf('SPA is mounted at "%s". Requested path "%s" is outside the configured URL prefix.', $this->mount, $path),
-                404,
-                ['Content-Type' => 'text/plain; charset=utf-8'],
-            );
+            return $this->errorResponse($request, 404, 'Requested path is outside the configured SPA URL prefix.');
+        }
+        if (!in_array($request->getMethod(), ['GET', 'HEAD'], true)) {
+            return $this->errorResponse($request, 405, 'SPA delivery only supports GET and HEAD.', ['Allow' => 'GET, HEAD']);
         }
 
         $relativePath = $this->relativePath($path);
-        if (!$this->development && $relativePath !== '') {
-            $assetResponse = $this->tryStaticFile($relativePath);
-            if ($assetResponse !== null) {
-                return $assetResponse;
+        if (!$this->isPublicAssetPath($relativePath)) {
+            return $this->errorResponse($request, 404, 'SPA asset not found.');
+        }
+
+        // Nur reguläre öffentliche Dateien aus dem gebundenen Bundle lesen.
+        if (!$this->development) {
+            try {
+                $this->bundleDir->assertDirectory();
+            } catch (FilesystemException) {
+                return $this->errorResponse($request, 500, 'Unable to read the SPA bundle.');
+            }
+
+            try {
+                if ($relativePath !== '') {
+                    $assetResponse = $this->tryStaticFile($relativePath, $request);
+                    if ($assetResponse !== null) {
+                        return $assetResponse;
+                    }
+                }
+            } catch (PathOutOfBoundsException | FilesystemPolicyViolationException) {
+                return $this->errorResponse($request, 404, 'SPA asset not found.');
+            } catch (FilesystemException) {
+                return $this->errorResponse($request, 500, 'Unable to read the SPA bundle.');
             }
         }
 
         // A missing asset must never be returned as HTML: browsers reject it as JS/CSS.
-        if (str_starts_with($relativePath, 'assets/') || pathinfo($relativePath, PATHINFO_EXTENSION) !== '') {
-            return $this->app->responseFactory->createResponse(404);
+        if ($relativePath === 'assets' || str_starts_with($relativePath, 'assets/') || pathinfo($relativePath, PATHINFO_EXTENSION) !== '') {
+            return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
-        return $this->app->responseFactory->createResponseWithBody(
-            $this->html->render(),
+        try {
+            $html = $this->html->render();
+        } catch (\Throwable) {
+            // Fehler im HTML-Generator dürfen keine internen Details ausgeben.
+            return $this->errorResponse($request, 500, 'Unable to render the SPA page.');
+        }
+
+        return $this->respond(
+            $request,
+            $html,
             200,
             ['Content-Type' => 'text/html; charset=utf-8'],
         );
     }
 
-    private function tryStaticFile(string $relativePath): ?ResponseInterface
+    private function tryStaticFile(string $relativePath, ServerRequestInterface $request): ?ResponseInterface
     {
-        $relativePath = rawurldecode($relativePath);
-        if ($relativePath === '' || str_contains($relativePath, "\0")) {
+        $file = $this->bundleDir->withSubPath($relativePath);
+        if (!$file->exists()) {
             return null;
         }
-        $segments = explode('/', str_replace('\\', '/', $relativePath));
-        if (in_array('..', $segments, true) || in_array('.', $segments, true)) {
-            return null;
+        if (!$file->isFile()) {
+            return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
-        $file = $this->bundleDir->withRelativePath($relativePath);
-        if (!$file->exists() || !$file->isFile()) {
-            return null;
-        }
-        $root = realpath((string) $this->bundleDir);
+        // Auch ein erlaubter interner Symlink darf keine private Datei freigeben.
         $resolved = realpath((string) $file);
-        if ($root === false || $resolved === false || !str_starts_with($resolved, $root . DIRECTORY_SEPARATOR)) {
-            return null;
+        $rootPrefix = rtrim($this->bundleRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        if ($resolved === false) {
+            return $this->errorResponse($request, 500, 'Unable to read the SPA asset.');
+        }
+        if (!str_starts_with($resolved, $rootPrefix) || !$this->isPublicAssetPath(substr($resolved, strlen($rootPrefix)))) {
+            return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
-        return $this->app->responseFactory->createResponseWithBody(
+        return $this->respond(
+            $request,
             $file->asFile()->get_contents(),
             200,
             ['Content-Type' => MimeMap::fromExtension($file->getExtension())],
+        );
+    }
+
+    private function decodeRequestPath(string $path): ?string
+    {
+        if (preg_match('/%(?![0-9a-f]{2})/i', $path)) {
+            return null;
+        }
+        $path = rawurldecode($path === '' ? '/' : $path);
+
+        // Genau einmal dekodieren; mehrdeutige Rest-Escapes nicht weiterreichen.
+        if (
+            !str_starts_with($path, '/')
+            || str_contains($path, '//')
+            || strpbrk($path, "\\?#") !== false
+            || preg_match('/[\x00-\x1f\x7f]|%[0-9a-f]{2}/i', $path)
+            || preg_match('//u', $path) !== 1
+        ) {
+            return null;
+        }
+
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '.' || $segment === '..') {
+                return null;
+            }
+        }
+
+        return $path;
+    }
+
+    private function isPublicAssetPath(string $path): bool
+    {
+        foreach (explode('/', str_replace('\\', '/', $path)) as $segment) {
+            if (
+                str_starts_with($segment, '.')
+                || str_contains($segment, ':')
+                || strlen($segment) > 255
+                || str_ends_with($segment, '.')
+                || str_ends_with($segment, ' ')
+                || str_ends_with($segment, '~')
+                || preg_match('/^(?:con(?:in\$|out\$)?|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:[ .]|$)/iu', ltrim($segment, ' '))
+                || in_array(strtolower($segment), [
+                    'vendor', 'node_modules', 'composer.json', 'composer.lock',
+                    'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
+                ], true)
+                || preg_match('/\.(?:php\d*|phtml|pht|phar|inc|env|ini|log|sql|sqlite3?|db|bak|backup|old|orig|save|sw[opn]|pem|key)(?:\.|$)/i', $segment)
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function errorResponse(ServerRequestInterface $request, int $status, string $message, array $headers = []): ResponseInterface
+    {
+        return $this->respond($request, $message, $status, ['Content-Type' => 'text/plain; charset=utf-8', ...$headers]);
+    }
+
+    private function respond(ServerRequestInterface $request, string $body, int $status, array $headers): ResponseInterface
+    {
+        $headers['X-Content-Type-Options'] = 'nosniff';
+        if ($status >= 400) {
+            $headers['Cache-Control'] = 'no-store';
+        }
+
+        return $this->app->responseFactory->createResponseWithBody(
+            $request->getMethod() === 'HEAD' ? '' : $body,
+            $status,
+            $headers,
         );
     }
 
