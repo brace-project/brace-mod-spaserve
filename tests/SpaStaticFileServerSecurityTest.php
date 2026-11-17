@@ -608,15 +608,455 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         }
     }
 
+    public static function missingAssetMessages(): iterable
+    {
+        // Nur der URL-Verzeichnisteil darf in der öffentlichen Diagnose erscheinen.
+        $cases = [
+            'CSS' => ['assets/missing.css', '/assets/', ' CSS requested.'],
+            'uppercase CSS' => ['assets/missing.CSS', '/assets/', ' CSS requested.'],
+            'JavaScript' => ['assets/missing.js', '/assets/', ' JavaScript requested.'],
+            'module JavaScript' => ['assets/missing.mjs', '/assets/', ' JavaScript requested.'],
+            'CommonJS' => ['assets/missing.cjs', '/assets/', ' JavaScript requested.'],
+            'extensionless asset' => ['assets/missing', '/assets/', ''],
+            'asset directory' => ['assets', '/assets/', ''],
+            'asset directory slash' => ['assets/', '/assets/', ''],
+            'root CSS' => ['style.css', '/', ' CSS requested.'],
+            'other public extension' => ['images/missing.png', '/images/', ''],
+            'nested JavaScript' => ['assets/nested/missing.js', '/assets/nested/', ' JavaScript requested.'],
+            'encoded space' => ['assets/my%20folder/missing.css', '/assets/my%20folder/', ' CSS requested.'],
+            'encoded Unicode' => ['assets/gr%C3%BC%C3%9Fe/missing.css', '/assets/gr%C3%BC%C3%9Fe/', ' CSS requested.'],
+            'literal percent directory' => ['assets/100%25/missing.js', '/assets/100%25/', ' JavaScript requested.'],
+            'encoded markup directory' => [
+                'assets/%3Cimg%20src=x%20onerror=alert(1)%3E/missing.css',
+                '/assets/%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E/',
+                ' CSS requested.',
+            ],
+            'query is omitted' => ['assets/missing.css?token=' . self::SECRET, '/assets/', ' CSS requested.'],
+            'filename markup is omitted' => ['assets/%3Cscript%3E.css', '/assets/', ' CSS requested.'],
+        ];
+
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                foreach ($cases as $name => [$path, $directory, $suffix]) {
+                    yield $name . ' ' . ($prefix ?: '/') . ($development ? ' dev' : ' prod')
+                        => [$prefix, $development, $path, $prefix . $directory, $suffix];
+                }
+            }
+        }
+    }
+
+    #[DataProvider('missingAssetMessages')]
+    public function test_missing_assets_report_only_the_encoded_public_url_directory(
+        string $prefix,
+        bool $development,
+        string $path,
+        string $directory,
+        string $suffix,
+    ): void {
+        $headers = ['Accept' => 'text/html', 'Sec-Fetch-Dest' => 'document'];
+        $response = $this->request($prefix, $path, development: $development, headers: $headers);
+        $this->assertFailure($response);
+        self::assertSame('File not Found (SPA-Serve Asset Path: ' . $directory . ').' . $suffix, (string) $response->getBody());
+        $this->assertFallbackVary($response);
+
+        $head = $this->request($prefix, $path, 'HEAD', $development, $headers);
+        $this->assertFailure($head, 404, true);
+        $this->assertFallbackVary($head);
+    }
+
+    public static function fallbackAcceptHeaders(): iterable
+    {
+        // Spezifität, Formatfehler und Asset-Präferenzen getrennt absichern.
+        $cases = [
+            'absent' => [null, null],
+            'empty' => ['', ' HTML not accepted.'],
+            'whitespace only' => [" \t ", ' HTML not accepted.'],
+            'empty list' => [',, ,', ' HTML not accepted.'],
+            'HTML' => ['text/html', null],
+            'all wildcard' => ['*/*', null],
+            'text wildcard' => ['text/*', null],
+            'JSON only' => ['application/json', ' HTML not accepted.'],
+            'XHTML is not HTML' => ['application/xhtml+xml', ' HTML not accepted.'],
+            'browser navigation' => ['text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8', null],
+            'specific HTML denial' => ['text/html;q=0,*/*;q=1', ' HTML not accepted.'],
+            'specific text denial' => ['text/*;q=0,*/*;q=1', ' HTML not accepted.'],
+            'specific HTML acceptance' => ['*/*;q=0,text/html;q=1', null],
+            'positive HTML overrides higher wildcard' => ['text/html;q=0.001,*/*;q=1', null],
+            'three decimal quality' => ['text/html;q=0.999', null],
+            'quality one with decimals' => ['text/html;q=1.000', null],
+            'quality one empty fraction' => ['text/html;q=1.', null],
+            'quality zero empty fraction' => ['text/html;q=0.', ' HTML not accepted.'],
+            'case insensitive type and q' => ['TEXT/HTML;Q=1', null],
+            'UTF8 charset' => ['text/html;charset=utf-8', null],
+            'quoted case insensitive charset' => ['TeXt/HtMl;ChArSeT="UTF-8";Q=0.5', null],
+            'charset after q' => ['text/html;q=0.8;charset=UTF-8', null],
+            'OWS around semicolons and member' => ['text/html ; charset=utf-8 ; q=1 ', null],
+            'space before q equals' => ['text/html;q = 1', ' Invalid Accept header.'],
+            'space after q equals' => ['text/html;q= 1', ' Invalid Accept header.'],
+            'space before charset equals' => ['text/html;charset = utf-8', ' Invalid Accept header.'],
+            'wrong charset' => ['text/html;charset=iso-8859-1', ' HTML not accepted.'],
+            'wrong charset permits matching wildcard' => ['text/html;charset=iso-8859-1,*/*;q=0.5', null],
+            'specific charset denial' => ['text/html;q=1,text/html;charset=utf-8;q=0', ' HTML not accepted.'],
+            'specific charset denies wildcard too' => ['text/html;charset=utf-8;q=0,text/html;q=1,*/*;q=1', ' HTML not accepted.'],
+            'specific charset acceptance' => ['text/html;charset=utf-8;q=0.5,text/html;q=0', null],
+            'unmatched media parameter' => ['text/html;profile=custom', ' HTML not accepted.'],
+            'unmatched parameter with wildcard' => ['text/html;profile=custom,*/*;q=0.5', null],
+            'quoted comma and semicolon' => ['application/json;profile="a,b;c",text/html', null],
+            'escaped quote in parameter' => ['application/json;profile="a\\"b,c",text/html', null],
+            'ignored empty list members' => [',,text/html,, ,', null],
+            'identical duplicate range' => ['text/html;q=0.5,text/html;q=0.5', null],
+            'duplicate q parameter' => ['text/html;q=1;q=1', ' Invalid Accept header.'],
+            'conflicting duplicate range' => ['text/html;q=1,text/html;q=0', ' Invalid Accept header.'],
+            'case normalized conflicting range' => ['text/html;charset=utf-8;q=0.2,TEXT/HTML;CHARSET=UTF-8;q=1', ' Invalid Accept header.'],
+            'missing leading zero' => ['text/html;q=.5', ' Invalid Accept header.'],
+            'negative quality' => ['text/html;q=-0.1', ' Invalid Accept header.'],
+            'quality exceeds one' => ['text/html;q=1.001', ' Invalid Accept header.'],
+            'quality exceeds range' => ['text/html;q=2', ' Invalid Accept header.'],
+            'too many quality decimals' => ['text/html;q=0.0000', ' Invalid Accept header.'],
+            'quality exponent' => ['text/html;q=1e0', ' Invalid Accept header.'],
+            'quality NaN' => ['text/html;q=NaN', ' Invalid Accept header.'],
+            'empty quality' => ['text/html;q=', ' Invalid Accept header.'],
+            'quoted quality' => ['text/html;q="1"', ' Invalid Accept header.'],
+            'leading zero quality' => ['text/html;q=01', ' Invalid Accept header.'],
+            'unterminated quoted parameter' => ['text/html;charset="utf-8', ' Invalid Accept header.'],
+            'trailing parameter separator' => ['text/html;', ' Invalid Accept header.'],
+            'missing subtype' => ['text', ' Invalid Accept header.'],
+            'invalid wildcard position' => ['*/html', ' Invalid Accept header.'],
+            'raw CRLF' => ["text/html\r\nX-Injected: " . self::SECRET, ' Invalid Accept header.'],
+            'raw NUL' => ["text/html\0", ' Invalid Accept header.'],
+            'raw DEL' => ["text/html\x7f", ' Invalid Accept header.'],
+            'CSS only' => ['text/css', ' CSS requested.'],
+            'JavaScript only' => ['application/javascript', ' JavaScript requested.'],
+            'text JavaScript only' => ['text/javascript', ' JavaScript requested.'],
+            'CSS outranks wildcard' => ['text/css,*/*;q=0.1', ' CSS requested.'],
+            'JavaScript ties wildcard' => ['text/javascript,*/*', ' JavaScript requested.'],
+            'CSS ties text wildcard' => ['text/css;q=0.5,text/*;q=0.5', ' CSS requested.'],
+            'explicit HTML wins tie with CSS' => ['text/html,text/css', null],
+            'explicit HTML wins tie with JavaScript' => ['text/html;q=0.5,application/javascript;q=0.5', null],
+            'HTML preferred over CSS' => ['text/html;q=1,text/css;q=0.5', null],
+            'CSS preferred over HTML' => ['text/html;q=0.5,text/css;q=1', ' CSS requested.'],
+            'JavaScript preferred over HTML' => ['text/html;q=0.5,text/javascript;q=0.7', ' JavaScript requested.'],
+            'CSS denial is not a resource hint' => ['text/css;q=0,*/*;q=1', null],
+            'JavaScript denial is not a resource hint' => ['application/javascript;q=0,*/*;q=1', null],
+            'zero qualities do not request CSS' => ['text/html;q=0,text/css;q=0', ' HTML not accepted.'],
+            'invalid quality overrides CSS hint' => ['text/css,*/*;q=.1', ' Invalid Accept header.'],
+        ];
+
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                foreach ($cases as $name => [$accept, $suffix]) {
+                    yield $name . ' ' . ($prefix ?: '/') . ($development ? ' dev' : ' prod')
+                        => [$prefix, $development, $accept, $suffix];
+                }
+            }
+        }
+    }
+
+    #[DataProvider('fallbackAcceptHeaders')]
+    public function test_html_fallback_respects_accept_without_confusing_assets_with_navigation(
+        string $prefix,
+        bool $development,
+        ?string $accept,
+        ?string $suffix,
+    ): void {
+        $headers = $accept === null ? [] : ['Accept' => $accept];
+        $request = $this->headerRequest($prefix . '/dashboard', $headers);
+        $response = $this->process($this->middleware($prefix, development: $development), $request);
+        $this->assertFallbackVary($response);
+        if ($suffix === null) {
+            self::assertSame(200, $response->getStatusCode());
+            self::assertSame('text/html; charset=utf-8', $response->getHeaderLine('Content-Type'));
+            self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+            return;
+        }
+
+        $this->assertFailure($response);
+        self::assertSame('File not Found (SPA-Serve Asset Path: ' . $prefix . '/).' . $suffix, (string) $response->getBody());
+    }
+
+    public static function fetchDestinations(): iterable
+    {
+        // Fetch-Metadaten sind case-sensitive Tokens, keine beliebigen Zeichenketten.
+        $cases = [
+            'absent' => [null, null],
+            'fetch empty token' => ['empty', null],
+            'document' => ['document', null],
+            'frame' => ['frame', null],
+            'iframe' => ['iframe', null],
+            'style' => ['style', ' CSS requested.'],
+            'script' => ['script', ' JavaScript requested.'],
+            'worker' => ['worker', ' JavaScript requested.'],
+            'sharedworker' => ['sharedworker', ' JavaScript requested.'],
+            'serviceworker' => ['serviceworker', ' JavaScript requested.'],
+            'image' => ['image', ' Asset requested.'],
+            'font' => ['font', ' Asset requested.'],
+            'audio' => ['audio', ' Asset requested.'],
+            'video' => ['video', ' Asset requested.'],
+            'object' => ['object', ' Asset requested.'],
+            'embed' => ['embed', ' Asset requested.'],
+            'manifest' => ['manifest', ' Asset requested.'],
+            'unknown' => ['unknown-destination', ' Asset requested.'],
+            'present empty' => ['', ' Asset requested.'],
+            'whitespace only' => [" \t ", ' Asset requested.'],
+            'uppercase document' => ['DOCUMENT', ' Asset requested.'],
+            'uppercase style' => ['STYLE', ' Asset requested.'],
+            'quoted document' => ['"document"', ' Asset requested.'],
+            'multiple tokens' => ['document, script', ' Asset requested.'],
+            'duplicate document tokens' => ['document, document', ' Asset requested.'],
+            'raw CRLF' => ["document\r\nX-Injected: " . self::SECRET, ' Asset requested.'],
+            'NUL around document' => ["\0document\0", ' Asset requested.'],
+            'CRLF around document' => ["\r\ndocument\r\n", ' Asset requested.'],
+            'vertical tab around document' => ["\vdocument\v", ' Asset requested.'],
+        ];
+
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                foreach ($cases as $name => [$destination, $suffix]) {
+                    yield $name . ' ' . ($prefix ?: '/') . ($development ? ' dev' : ' prod')
+                        => [$prefix, $development, $destination, $suffix];
+                }
+            }
+        }
+    }
+
+    #[DataProvider('fetchDestinations')]
+    public function test_fetch_destination_cannot_turn_a_resource_request_into_html(
+        string $prefix,
+        bool $development,
+        ?string $destination,
+        ?string $suffix,
+    ): void {
+        $headers = ['Accept' => 'text/html'];
+        if ($destination !== null) {
+            $headers['Sec-Fetch-Dest'] = $destination;
+        }
+        $request = $this->headerRequest($prefix . '/dashboard', $headers);
+        $response = $this->process($this->middleware($prefix, development: $development), $request);
+        $this->assertFallbackVary($response);
+        if ($suffix === null) {
+            self::assertSame(200, $response->getStatusCode());
+            self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+            return;
+        }
+
+        $this->assertFailure($response);
+        self::assertSame('File not Found (SPA-Serve Asset Path: ' . $prefix . '/).' . $suffix, (string) $response->getBody());
+    }
+
+    public function test_accept_limits_count_raw_bytes_and_quote_aware_list_members(): void
+    {
+        $cases = [
+            ['text/html' . str_repeat(' ', 8183), true],
+            ['text/html' . str_repeat(' ', 8184), false],
+            [implode(',', array_fill(0, 64, 'text/html')), true],
+            [implode(',', array_fill(0, 65, 'text/html')), false],
+            [str_repeat(',', 63) . 'text/html', true],
+            [str_repeat(',', 64) . 'text/html', false],
+            ['application/json;profile="' . str_repeat('x,', 70) . 'x",text/html', true],
+        ];
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                foreach ($cases as [$accept, $allowed]) {
+                    $request = $this->headerRequest($prefix . '/dashboard', ['Accept' => $accept]);
+                    $response = $this->process($this->middleware($prefix, development: $development), $request);
+                    $this->assertFallbackVary($response);
+                    if ($allowed) {
+                        self::assertSame(200, $response->getStatusCode());
+                        self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+                    } else {
+                        $this->assertFailure($response);
+                        self::assertSame('File not Found (SPA-Serve Asset Path: ' . $prefix . '/). Invalid Accept header.', (string) $response->getBody());
+                    }
+                }
+            }
+        }
+    }
+
+    public function test_multiple_accept_fields_are_evaluated_as_one_header(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            $accepted = new ServerRequest(
+                uri: $prefix . '/dashboard',
+                headers: ['Accept' => ['text/html', 'text/css']],
+            );
+            $response = $this->process($this->middleware($prefix), $accepted);
+            self::assertSame(200, $response->getStatusCode());
+            self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+            $this->assertFallbackVary($response);
+
+            $conflict = new ServerRequest(
+                uri: $prefix . '/dashboard',
+                headers: ['Accept' => ['text/html;q=1', 'text/html;q=0']],
+            );
+            $response = $this->process($this->middleware($prefix), $conflict);
+            $this->assertFailure($response);
+            self::assertSame('File not Found (SPA-Serve Asset Path: ' . $prefix . '/). Invalid Accept header.', (string) $response->getBody());
+        }
+    }
+
+    public function test_existing_public_assets_ignore_navigation_negotiation(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([
+                ['Accept' => 'text/css', 'Sec-Fetch-Dest' => 'style'],
+                ['Accept' => 'text/html;q=2', 'Sec-Fetch-Dest' => 'unknown'],
+                ['Accept' => '', 'Sec-Fetch-Dest' => 'image'],
+            ] as $headers) {
+                $response = $this->request($prefix, 'assets/app.js', headers: $headers);
+                self::assertSame(200, $response->getStatusCode());
+                self::assertSame(self::PUBLIC_JS, (string) $response->getBody());
+                self::assertSame('text/javascript; charset=utf-8', $response->getHeaderLine('Content-Type'));
+
+                $head = $this->request($prefix, 'assets/app.js', 'HEAD', headers: $headers);
+                self::assertSame(200, $head->getStatusCode());
+                self::assertSame('', (string) $head->getBody());
+            }
+        }
+    }
+
+    public function test_missing_asset_type_precedes_conflicting_navigation_headers(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                foreach ([
+                    ['assets/missing.css', ' CSS requested.'],
+                    ['assets/missing.js', ' JavaScript requested.'],
+                    ['assets/missing', ''],
+                ] as [$path, $suffix]) {
+                    $response = $this->request($prefix, $path, development: $development, headers: [
+                        'Accept' => 'text/html;q=2',
+                        'Sec-Fetch-Dest' => 'image',
+                    ]);
+                    $this->assertFailure($response);
+                    self::assertSame('File not Found (SPA-Serve Asset Path: ' . $prefix . '/assets/).' . $suffix, (string) $response->getBody());
+                    $this->assertFallbackVary($response);
+                }
+            }
+        }
+    }
+
+    public function test_extensionless_missing_assets_keep_clear_css_and_javascript_hints(): void
+    {
+        $cases = [
+            [['Accept' => 'text/html', 'Sec-Fetch-Dest' => 'style'], ' CSS requested.'],
+            [['Accept' => 'text/html', 'Sec-Fetch-Dest' => 'script'], ' JavaScript requested.'],
+            [['Accept' => 'text/css,*/*;q=0.1'], ' CSS requested.'],
+            [['Accept' => 'application/javascript,*/*;q=0.1'], ' JavaScript requested.'],
+            [['Accept' => 'text/html,text/css'], ''],
+        ];
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                foreach ($cases as [$headers, $suffix]) {
+                    $response = $this->request($prefix, 'assets/missing', development: $development, headers: $headers);
+                    $this->assertFailure($response);
+                    self::assertSame('File not Found (SPA-Serve Asset Path: ' . $prefix . '/assets/).' . $suffix, (string) $response->getBody());
+                    $this->assertFallbackVary($response);
+                }
+            }
+        }
+    }
+
+    public function test_negotiation_rejects_before_rendering_and_keeps_head_bodyless(): void
+    {
+        $html = new class extends HtmlGenerator {
+            public function render(): string
+            {
+                throw new \RuntimeException('Rejected navigation reached rendering: ' . self::class);
+            }
+        };
+        foreach (['', '/demo'] as $prefix) {
+            $middleware = $this->middleware($prefix, html: $html);
+            foreach ([
+                ['Accept' => 'application/json'],
+                ['Accept' => 'text/html;q=2'],
+                ['Accept' => 'text/html', 'Sec-Fetch-Dest' => 'script'],
+                ['Accept' => 'text/html', 'Sec-Fetch-Dest' => 'unknown'],
+            ] as $headers) {
+                foreach (['GET', 'HEAD'] as $method) {
+                    $request = $this->headerRequest($prefix . '/dashboard', $headers, $method);
+                    $response = $this->process($middleware, $request);
+                    $this->assertFailure($response, 404, $method === 'HEAD');
+                    $this->assertFallbackVary($response);
+                }
+            }
+        }
+    }
+
+    public function test_negotiation_does_not_intercept_excluded_api_requests(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            $request = new ServerRequest(
+                uri: $prefix . '/api/users',
+                method: 'POST',
+                headers: ['Accept' => 'text/html;q=2', 'Sec-Fetch-Dest' => 'script'],
+            );
+            $handler = new class implements RequestHandlerInterface {
+                public ?ServerRequestInterface $received = null;
+
+                public function handle(ServerRequestInterface $request): ResponseInterface
+                {
+                    $this->received = $request;
+                    return new EmptyResponse(418);
+                }
+            };
+            $response = $this->middleware($prefix)->process($request, $handler);
+            self::assertSame($request, $handler->received);
+            self::assertSame(418, $response->getStatusCode());
+        }
+    }
+
+    public function test_private_and_malformed_paths_never_use_the_reflecting_asset_diagnostic(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            foreach (['.env', '%2e%2e/private', 'assets/%00secret', 'assets/%3fsecret'] as $path) {
+                $response = $this->request($prefix, $path, headers: [
+                    'Accept' => 'text/css',
+                    'Sec-Fetch-Dest' => 'style',
+                ]);
+                $this->assertFailure($response);
+                self::assertStringNotContainsString('SPA-Serve Asset Path:', (string) $response->getBody());
+                self::assertStringNotContainsString($path, (string) $response->getBody());
+            }
+        }
+    }
+
+    private function headerRequest(string $path, array $headers, string $method = 'GET'): ServerRequestInterface
+    {
+        // Fehlerhafte Adapter-Header unverändert prüfen, auch wenn PSR-7 sie ablehnen würde.
+        $normalized = array_change_key_case($headers, CASE_LOWER);
+        $request = $this->createStub(ServerRequestInterface::class);
+        $request->method('getUri')->willReturn((new ServerRequest(uri: $path))->getUri());
+        $request->method('getMethod')->willReturn($method);
+        $request->method('getHeaders')->willReturn($headers);
+        $request->method('hasHeader')->willReturnCallback(
+            static fn (string $name): bool => array_key_exists(strtolower($name), $normalized),
+        );
+        $request->method('getHeader')->willReturnCallback(
+            static fn (string $name): array => (array) ($normalized[strtolower($name)] ?? []),
+        );
+        $request->method('getHeaderLine')->willReturnCallback(
+            static fn (string $name): string => implode(', ', (array) ($normalized[strtolower($name)] ?? [])),
+        );
+        return $request;
+    }
+
+    private function assertFallbackVary(ResponseInterface $response): void
+    {
+        $vary = array_map('trim', explode(',', strtolower($response->getHeaderLine('Vary'))));
+        self::assertContains('accept', $vary);
+        self::assertContains('sec-fetch-dest', $vary);
+    }
+
     private function request(
         string $prefix,
         string $path,
         string $method = 'GET',
         bool $development = false,
+        array $headers = [],
     ): ResponseInterface {
         return $this->process(
             $this->middleware($prefix, development: $development),
-            new ServerRequest(uri: $prefix . '/' . $path, method: $method),
+            new ServerRequest(uri: $prefix . '/' . $path, method: $method, headers: $headers),
         );
     }
 

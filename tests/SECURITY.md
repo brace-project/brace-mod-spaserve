@@ -28,6 +28,8 @@ as successful security assertions.
 | Malformed input | Invalid percent encoding, NUL/control characters, malformed request paths and normalization differences at the server boundary. |
 | Failure handling | Controlled rejection or server error without outside-root contents, reflected attack markup, filesystem paths, PHP warnings or stack traces. |
 | Fallback | Legitimate client-side routes can receive the SPA; unsafe paths and missing assets must not turn into successful HTML responses. |
+| HTML negotiation | Accept quality/specificity, charset parameters, quoted values, repeated fields, malformed or oversized headers and Fetch destinations must not turn CSS/JavaScript requests into HTML. |
+| Asset diagnostics | Missing resources identify only the encoded public URL directory and a fixed resource hint; never echo query values, attack markup or local filesystem paths. |
 | HTTP behavior | Supported methods, bodyless HEAD responses and content types with `X-Content-Type-Options: nosniff`; unsupported methods cannot disclose file contents. |
 | Generated HTML | Title, meta names/values, asset attributes and base/API configuration remain in their intended text or attribute context. |
 
@@ -46,8 +48,28 @@ Requests are limited to 8192 raw path bytes and asset segments to 255 bytes.
 SPA-owned GET and HEAD requests are supported; HEAD responses have no body.
 Invalid/private/missing assets return 404, unsupported methods 405 with an Allow
 header, oversized paths 414, and operational bundle/render failures 500. These
-errors are plain text with `nosniff` and `Cache-Control: no-store`, without
-reflecting input or internal diagnostics. API handlers retain their own behavior.
+errors are plain text with `nosniff` and `Cache-Control: no-store`. Missing public
+resources use `File not Found (SPA-Serve Asset Path: /public/directory/).`, with
+percent-encoded URL segments and an optional fixed CSS/JavaScript or rejection
+hint. Private/invalid paths retain generic diagnostics. No error may expose raw
+attack markup, query values or internal filesystem diagnostics. API handlers
+retain their own behavior.
+
+HTML fallback must honor the effective quality of `text/html; charset=utf-8`,
+including an explicit `q=0` overriding a positive wildcard. Missing Accept means
+no media preference; a present empty field accepts no representation. Conflicting
+duplicate ranges, duplicate parameters and malformed weights reject fallback.
+Accept parsing is bounded to 8192 bytes and 64 list members, including empty
+members; non-ASCII header bytes are rejected by this module's strict parser.
+
+Explicit positive CSS/JavaScript preferences outrank lower-quality HTML and tied
+HTML wildcards. Fetch destinations other than absent metadata or the literal
+tokens `empty`, `document`, `frame` and `iframe` reject fallback. Unknown or
+malformed destinations also reject it as a conservative module policy. Generated
+HTML and missing-resource diagnostics vary on `Accept, Sec-Fetch-Dest`.
+Successful public-file reads and excluded API requests bypass this negotiation.
+Exercise these guarantees in development and production, including HEAD and
+renderer-failure sentinels that prove rejection happens before HTML generation.
 
 ## 3. Research basis
 
@@ -64,6 +86,9 @@ SPA-Serve uses the affected libraries or has every listed vulnerability.
 | [Werkzeug 3.1.9 security fix][werkzeug] | Windows device names and alternate data streams need explicit treatment where supported. |
 | [Express September 2024 security releases][express] | Asset redirects and generated response HTML can introduce XSS. |
 | [OWASP XSS prevention guidance][owasp] | Escaping must match the output context, including the surrounding HTML. |
+| [RFC 9110 Accept semantics][http-accept] | Missing Accept, wildcards, weights and media parameters have distinct meanings; a broad wildcard cannot override a specific HTML rejection. |
+| [Fetch default Accept headers][fetch] | Script requests can accept everything, and stylesheet requests can include a low-quality wildcard; HTML acceptability alone does not identify navigation. |
+| [Fetch Metadata][fetch-metadata] | Use resource destinations to reject inappropriate fallback and include the relevant request headers in Vary. |
 
 [starlette-prefix]: https://github.com/Kludex/starlette/security/advisories/GHSA-v5gw-mw7f-84px
 [apache]: https://httpd.apache.org/security/vulnerabilities_24.html#CVE-2021-42013
@@ -73,6 +98,9 @@ SPA-Serve uses the affected libraries or has every listed vulnerability.
 [werkzeug]: https://werkzeug.palletsprojects.com/en/stable/changes/#version-3-1-9
 [express]: https://expressjs.com/en/blog/2024-09-29-security-releases/
 [owasp]: https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html
+[http-accept]: https://www.rfc-editor.org/rfc/rfc9110.html#section-12.5.1
+[fetch]: https://fetch.spec.whatwg.org/#concept-fetch
+[fetch-metadata]: https://www.w3.org/TR/fetch-metadata/
 
 ## 4. Trusted configuration and deployment limits
 
@@ -91,6 +119,12 @@ Configured JavaScript/CSS URLs and Vite development endpoints are also trusted
 application configuration. Attribute escaping does not make an attacker-chosen
 script source safe. Do not populate these values from untrusted request data.
 Existing title/meta escaping is a positive control, not an observed XSS finding.
+
+Accept and Fetch metadata select content; they are not authentication or access
+control. Missing extensions, wildcard-only acceptance and absent destination
+metadata cannot distinguish an asset client from navigation. Such requests may
+receive the shell for compatibility; asset URLs or explicit media/destination
+headers provide the required distinction.
 
 Tests cover requests that reach SPA-Serve. They cannot secure Apache/Nginx rules
 that serve private files directly, bypass the middleware, or introduce separate

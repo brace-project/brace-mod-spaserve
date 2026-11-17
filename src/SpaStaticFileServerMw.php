@@ -22,6 +22,9 @@ use Psr\Http\Server\RequestHandlerInterface;
 final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 {
     private const MAX_PATH_BYTES = 8192;
+    private const MAX_ACCEPT_BYTES = 8192;
+    private const MAX_ACCEPT_RANGES = 64;
+    private const FALLBACK_VARY = 'Accept, Sec-Fetch-Dest';
 
     private ?PhoreDirectory $bundleDir = null;
     private ?string $bundleRoot = null;
@@ -103,7 +106,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      *
      * URL decoding precedes every routing and filesystem decision. Invalid or
      * private paths return 404, unsupported methods 405 and operational errors
-     * 500. Error bodies never include request input or filesystem diagnostics.
+     * 500. Missing assets name only the encoded public URL directory, never a
+     * filesystem path. HTML fallback respects Accept and the fetch destination.
      * Excluded requests are passed to the handler unchanged.
      *
      * @param ServerRequestInterface $request Request from the HTTP adapter.
@@ -164,9 +168,13 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             }
         }
 
-        // A missing asset must never be returned as HTML: browsers reject it as JS/CSS.
+        // Fehlende Assets dürfen auch bei HTML-Akzeptanz keine SPA-Seite erhalten.
         if ($relativePath === 'assets' || str_starts_with($relativePath, 'assets/') || pathinfo($relativePath, PATHINFO_EXTENSION) !== '') {
-            return $this->errorResponse($request, 404, 'SPA asset not found.');
+            return $this->missingAssetResponse($request, $relativePath);
+        }
+        $fallbackRejection = $this->fallbackRejection($request);
+        if ($fallbackRejection !== null) {
+            return $this->missingAssetResponse($request, $relativePath, $fallbackRejection);
         }
 
         try {
@@ -180,7 +188,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             $request,
             $html,
             200,
-            ['Content-Type' => 'text/html; charset=utf-8'],
+            ['Content-Type' => 'text/html; charset=utf-8', 'Vary' => self::FALLBACK_VARY],
         );
     }
 
@@ -194,7 +202,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 return null;
             }
             if (!$file->isFile()) {
-                return $this->errorResponse($request, 404, 'SPA asset not found.');
+                return $this->missingAssetResponse($request, $relativePath);
             }
         } catch (FilesystemException) {
             return $this->errorResponse($request, 404, 'SPA asset not found.');
@@ -216,6 +224,239 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             200,
             ['Content-Type' => MimeMap::fromExtension($file->getExtension())],
         );
+    }
+
+    /** Return a fixed diagnostic when the missing resource is not an HTML route. */
+    private function fallbackRejection(ServerRequestInterface $request): ?string
+    {
+        // Browser senden für Skripte oft */*: Das Ladeziel muss dann entscheiden.
+        if ($request->hasHeader('Sec-Fetch-Dest')) {
+            $destination = trim($request->getHeaderLine('Sec-Fetch-Dest'), " \t");
+            if ($destination === 'style') {
+                return 'CSS requested.';
+            }
+            if (in_array($destination, [
+                'script', 'worker', 'sharedworker', 'serviceworker',
+                'audioworklet', 'paintworklet',
+            ], true)) {
+                return 'JavaScript requested.';
+            }
+            if (!in_array($destination, ['empty', 'document', 'frame', 'iframe'], true)) {
+                return 'Asset requested.';
+            }
+        }
+
+        // Ohne Accept gilt jede Medienart als akzeptiert; leer ist nicht fehlend.
+        if (!$request->hasHeader('Accept')) {
+            return null;
+        }
+        $ranges = $this->parseAccept($request->getHeaderLine('Accept'));
+        if ($ranges === null) {
+            return 'Invalid Accept header.';
+        }
+
+        $htmlQuality = 0;
+        $htmlSpecificity = -1;
+        $assetQuality = 0;
+        $assetReason = null;
+        foreach ($ranges as $range) {
+            $type = $range['type'];
+            $quality = $range['quality'];
+            $resource = match ($type) {
+                'text/css' => 'CSS requested.',
+                'text/javascript', 'application/javascript',
+                'text/ecmascript', 'application/ecmascript',
+                'application/x-javascript', 'application/x-ecmascript',
+                'text/x-javascript', 'text/x-ecmascript',
+                'text/jscript', 'text/livescript' => 'JavaScript requested.',
+                default => null,
+            };
+            if ($resource !== null && $quality > $assetQuality) {
+                $assetQuality = $quality;
+                $assetReason = $resource;
+            }
+
+            $specificity = match ($type) {
+                '*/*' => 0,
+                'text/*' => 2,
+                'text/html' => 4,
+                default => -1,
+            };
+            foreach ($range['parameters'] as $name => $value) {
+                if ($name !== 'charset' || $value !== 'utf-8') {
+                    $specificity = -1;
+                    break;
+                }
+            }
+            if ($specificity < 0) {
+                continue;
+            }
+            $specificity += count($range['parameters']);
+            if ($specificity > $htmlSpecificity) {
+                $htmlSpecificity = $specificity;
+                $htmlQuality = $quality;
+            }
+        }
+
+        // Ein expliziter CSS-/JS-Wunsch geht einer schwächeren HTML-Wildcard vor.
+        if ($assetReason !== null && (
+            $assetQuality > $htmlQuality
+            || ($assetQuality === $htmlQuality && $htmlSpecificity < 4)
+        )) {
+            return $assetReason;
+        }
+        return $htmlQuality > 0 ? null : 'HTML not accepted.';
+    }
+
+    /** @return list<array{type: string, parameters: array<string, string>, quality: int}>|null */
+    private function parseAccept(string $header): ?array
+    {
+        if (strlen($header) > self::MAX_ACCEPT_BYTES || preg_match('/[\x00-\x08\x0a-\x1f\x7f-\xff]/', $header)) {
+            return null;
+        }
+        $members = $this->splitHeaderValue($header, ',');
+        if ($members === null || count($members) > self::MAX_ACCEPT_RANGES) {
+            return null;
+        }
+
+        // Trennzeichen innerhalb zitierter Parameter sind keine Listengrenzen.
+        $ranges = [];
+        $seen = [];
+        foreach ($members as $member) {
+            if (trim($member) === '') {
+                continue;
+            }
+            $parts = $this->splitHeaderValue($member, ';');
+            if ($parts === null) {
+                return null;
+            }
+            $type = strtolower(trim(array_shift($parts)));
+            $media = explode('/', $type);
+            if (count($media) !== 2 || !$this->isHttpToken($media[0]) || !$this->isHttpToken($media[1]) || ($media[0] === '*' && $media[1] !== '*')) {
+                return null;
+            }
+            $quality = 1000;
+            $parameters = [];
+            $names = [];
+            foreach ($parts as $part) {
+                $parameter = explode('=', trim($part, " \t"), 2);
+                $name = strtolower($parameter[0]);
+                if (count($parameter) !== 2 || !$this->isHttpToken($name) || isset($names[$name])) {
+                    return null;
+                }
+                $names[$name] = true;
+                $rawValue = $parameter[1];
+                if ($name === 'q') {
+                    if (!preg_match('/^(?:0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)$/D', $rawValue)) {
+                        return null;
+                    }
+                    $quality = (int) round((float) $rawValue * 1000);
+                    continue;
+                }
+                $value = $this->decodeHeaderValue($rawValue);
+                if ($value === null) {
+                    return null;
+                }
+                $parameters[$name] = $name === 'charset' ? strtolower($value) : $value;
+            }
+
+            // Widersprüchliche Gewichte dürfen nicht von der Reihenfolge abhängen.
+            ksort($parameters);
+            $key = $type . ':' . json_encode($parameters);
+            if (isset($seen[$key]) && $seen[$key] !== $quality) {
+                return null;
+            }
+            $seen[$key] = $quality;
+            $ranges[] = ['type' => $type, 'parameters' => $parameters, 'quality' => $quality];
+        }
+        return $ranges;
+    }
+
+    /** @return list<string>|null */
+    private function splitHeaderValue(string $value, string $delimiter): ?array
+    {
+        // Zitierte Trennzeichen und escaped Anführungszeichen zusammenhalten.
+        $parts = [];
+        $start = 0;
+        $quoted = false;
+        $escaped = false;
+        for ($index = 0, $length = strlen($value); $index < $length; $index++) {
+            $character = $value[$index];
+            if ($escaped) {
+                $escaped = false;
+            } elseif ($quoted && $character === '\\') {
+                $escaped = true;
+            } elseif ($character === '"') {
+                $quoted = !$quoted;
+            } elseif (!$quoted && $character === $delimiter) {
+                $parts[] = substr($value, $start, $index - $start);
+                $start = $index + 1;
+            }
+        }
+        if ($quoted) {
+            return null;
+        }
+        $parts[] = substr($value, $start);
+        return $parts;
+    }
+
+    private function decodeHeaderValue(string $value): ?string
+    {
+        if (!str_starts_with($value, '"')) {
+            return $this->isHttpToken($value) ? $value : null;
+        }
+        if (strlen($value) < 2 || !str_ends_with($value, '"')) {
+            return null;
+        }
+        // Nur den Inhalt eines vollständig zitierten Parameterwerts dekodieren.
+        $decoded = '';
+        for ($index = 1, $end = strlen($value) - 1; $index < $end; $index++) {
+            if ($value[$index] === '\\') {
+                $index++;
+                if ($index >= $end) {
+                    return null;
+                }
+            } elseif ($value[$index] === '"') {
+                return null;
+            }
+            $decoded .= $value[$index];
+        }
+        return $decoded;
+    }
+
+    private function isHttpToken(string $value): bool
+    {
+        return preg_match('/^[!#$%&\'*+.^_`|~0-9a-z-]+$/iD', $value) === 1;
+    }
+
+    private function missingAssetResponse(ServerRequestInterface $request, string $relativePath, ?string $reason = null): ResponseInterface
+    {
+        if ($reason === null) {
+            $reason = match (strtolower(pathinfo($relativePath, PATHINFO_EXTENSION))) {
+                'css' => 'CSS requested.',
+                'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx' => 'JavaScript requested.',
+                default => '',
+            };
+            if ($reason === '') {
+                $hint = $this->fallbackRejection($request);
+                if (in_array($hint, ['CSS requested.', 'JavaScript requested.'], true)) {
+                    $reason = $hint;
+                }
+            }
+        }
+        $separator = strrpos($relativePath, '/');
+        $directory = $separator === false ? '' : substr($relativePath, 0, $separator + 1);
+        if ($relativePath === 'assets') {
+            $directory = 'assets/';
+        }
+        $directory = rtrim($this->mount, '/') . '/' . $directory;
+        // Ausschließlich das öffentliche URL-Verzeichnis zeigen, sicher kodiert.
+        $directory = implode('/', array_map('rawurlencode', explode('/', $directory)));
+        $message = 'File not Found (SPA-Serve Asset Path: ' . $directory . ').';
+        if ($reason !== '') {
+            $message .= ' ' . $reason;
+        }
+        return $this->errorResponse($request, 404, $message, ['Vary' => self::FALLBACK_VARY]);
     }
 
     private function decodeRequestPath(string $path): ?string

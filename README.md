@@ -43,6 +43,42 @@ Run Brace on port 8080 and Vite on port 4000; open the **Vite** URL in the brows
 
 `ViteAutoHtml` also supports `appBasePath`, `apiBaseUrl`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startHtml`. `startHtml` is trusted application HTML and is inserted unchanged at the beginning of `<body>`, before the generated module scripts. It can therefore contain complete nested startup markup instead of describing only one element. It must not contain untrusted user input. ViteAutoHtml emits `/@vite/client` and `devEntrypoint` in development, and the configured CSS/JavaScript bundle in production. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
 
+## Missing assets and HTML fallback
+
+Missing files under `assets/` and missing paths with a file extension always
+return HTTP 404, including requests that accept HTML. A missing stylesheet at
+`/demo/assets/app.css` receives this short plain-text response:
+
+```text
+File not Found (SPA-Serve Asset Path: /demo/assets/). CSS requested.
+```
+
+JavaScript requests receive `JavaScript requested.` instead. The directory is
+the public URL directory, with its segments percent-encoded; the response never
+exposes the server's local bundle path. Rejected private or malformed paths keep
+generic diagnostics. Error responses use `nosniff` and `Cache-Control: no-store`;
+HEAD responses have no body. Bundle/read/render failures remain HTTP 500.
+
+For extensionless client-side routes, the SPA shell is available only when
+`Accept` permits `text/html; charset=utf-8`. The most specific matching media
+range determines its quality: `text/html;q=0, */*;q=1` rejects HTML. An absent
+`Accept` header accepts any media type; a present empty header accepts none.
+Malformed or ambiguous headers fail with 404 instead of generating the shell.
+
+The middleware also checks resource intent. `Sec-Fetch-Dest: script`, `style`
+and other resource destinations reject fallback even with `Accept: */*`.
+Only absent metadata and the tokens `empty`, `document`, `frame` and `iframe`
+permit fallback; unknown or malformed destination values are rejected by this
+module's conservative policy. An explicit CSS/JavaScript preference also blocks
+fallback when its quality is higher than HTML's, or tied with an HTML wildcard.
+An equally preferred explicit `text/html` range remains suitable for navigation.
+
+Generated HTML and these 404 responses include `Vary: Accept, Sec-Fetch-Dest`.
+Existing public files and excluded API routes retain their own delivery behavior.
+An extensionless request with only `Accept: */*` and no resource destination is
+indistinguishable from a compatible navigation request and can receive HTML;
+asset clients should identify their media type or use an asset URL.
+
 ## Typed API stub
 
 `TypeScriptApiGeneratorModule` handles the complete Brace integration for API-stub generation. It reads every named route already registered on the Brace router; unnamed routes are ignored:
