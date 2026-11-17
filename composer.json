@@ -14,6 +14,7 @@
     "require": {
         "php": ">=8.3",
         "brace/command": "*",
+        "brace/mod-router": "*",
         "phore/filesystem": "*",
         "phore/system": "*",
         "phore/schema": "*"
