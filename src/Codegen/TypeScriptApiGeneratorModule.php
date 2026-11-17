@@ -28,6 +28,7 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         private readonly GeneratedFileWriter $writer = new GeneratedFileWriter(),
         private readonly bool $autoGenerateInDevelopment = true,
         private readonly string $commandName = 'spa-api-build',
+        private readonly string $apiMountPath = '',
     ) {
     }
 
@@ -68,6 +69,14 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         $classes = [];
         foreach ($this->app->router->getNamedRoutes() as $route) {
             [$methods, $path] = explode('@', $route['route'], 2);
+            $prefix = $this->app->router->getPrefix();
+            if ($prefix !== '' && ($path === $prefix || str_starts_with($path, $prefix . '/'))) {
+                $path = substr($path, strlen($prefix)) ?: '/';
+            }
+            $apiMountPath = '/' . trim($this->apiMountPath, '/');
+            if ($apiMountPath !== '/' && ($path === $apiMountPath || str_starts_with($path, $apiMountPath . '/'))) {
+                $path = substr($path, strlen($apiMountPath)) ?: '/';
+            }
             $path = preg_replace_callback('/::?([A-Za-z_][A-Za-z0-9_]*)/', static fn (array $match): string => '{' . $match[1] . '}', $path) ?? $path;
             $function = $this->parseCallback($route['call']);
             preg_match_all('/\{([A-Za-z_][A-Za-z0-9_]*)\}/', $path, $matches);

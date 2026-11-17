@@ -6,6 +6,17 @@ namespace Brace\SpaServe\Html;
 
 final class ViteAutoHtml extends HtmlGenerator
 {
+    /** @var array<string, scalar|null> */
+    private array $configuredMeta;
+    /** @var list<string> */
+    private array $configuredCss;
+    /** @var list<string> */
+    private array $configuredJavascript;
+    /** @var list<string> */
+    private array $additionalCss;
+    /** @var list<string> */
+    private array $additionalJavascript;
+
     /**
      * Production uses $css/$javascript. In development those bundle assets are
      * replaced by the Vite client/entrypoint. Additional assets are always loaded.
@@ -19,7 +30,8 @@ final class ViteAutoHtml extends HtmlGenerator
      */
     public function __construct(
         public bool $development,
-        public string $basePath = '/',
+        public string $appBasePath = '/',
+        public string $apiBaseUrl = '',
         string $title = '',
         array $meta = [],
         array $css = [],
@@ -30,28 +42,37 @@ final class ViteAutoHtml extends HtmlGenerator
         public string $devViteClient = '/@vite/client',
         public ?string $devEntrypoint = '/src/main.ts',
     ) {
-        $basePath = $this->normalizeBasePath($basePath);
-        $this->basePath = $basePath;
+        $this->configuredMeta = $meta;
+        $this->configuredCss = $css;
+        $this->configuredJavascript = $javascript;
+        $this->additionalCss = $additionalCss;
+        $this->additionalJavascript = $additionalJavascript;
 
-        $resolvedCss = $development ? $additionalCss : [...$css, ...$additionalCss];
-        $resolvedJavascript = $development
+        parent::__construct(title: $title, startHtml: $startHtml);
+        $this->setApplicationUrls($appBasePath, $apiBaseUrl);
+    }
+
+    public function setApplicationUrls(string $appBasePath, string $apiBaseUrl = ''): void
+    {
+        $appBasePath = $this->normalizeBasePath($appBasePath);
+        $this->appBasePath = $appBasePath;
+        $this->apiBaseUrl = $apiBaseUrl !== '' ? rtrim($apiBaseUrl, '/') : rtrim($appBasePath, '/');
+
+        $resolvedCss = $this->development ? $this->additionalCss : [...$this->configuredCss, ...$this->additionalCss];
+        $resolvedJavascript = $this->development
             ? [
-                $devViteClient,
-                ...($devEntrypoint !== null ? [$devEntrypoint] : []),
-                ...$additionalJavascript,
+                $this->devViteClient,
+                ...($this->devEntrypoint !== null ? [$this->devEntrypoint] : []),
+                ...$this->additionalJavascript,
             ]
-            : [...$javascript, ...$additionalJavascript];
+            : [...$this->configuredJavascript, ...$this->additionalJavascript];
 
-        parent::__construct(
-            title: $title,
-            meta: array_merge([
-                'spa-base-path' => $basePath,
-                'spa-api-base-url' => $basePath === '/' ? '' : rtrim($basePath, '/'),
-            ], $meta),
-            css: array_map(fn (string $path) => $this->resolvePath($path, $basePath), $resolvedCss),
-            javascript: array_map(fn (string $path) => $this->resolvePath($path, $basePath), $resolvedJavascript),
-            startHtml: $startHtml,
-        );
+        $this->meta = array_merge([
+            'app-base-path' => $appBasePath,
+            'api-base-url' => $this->apiBaseUrl,
+        ], $this->configuredMeta);
+        $this->css = array_map(fn (string $path) => $this->resolvePath($path, $appBasePath), $resolvedCss);
+        $this->javascript = array_map(fn (string $path) => $this->resolvePath($path, $appBasePath), $resolvedJavascript);
     }
 
     private function normalizeBasePath(string $basePath): string

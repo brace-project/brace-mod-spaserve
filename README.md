@@ -15,8 +15,8 @@ $app->addMiddleware(new SpaStaticFileServerMw(
     bundleDir: __DIR__ . '/frontend/dist',
     html: new ViteAutoHtml(
         development: $app->environmentType === EnvironmentType::DEVELOPMENT,
-        css: ['/assets/app.css'],
-        javascript: ['/assets/app.js'],
+        css: ['assets/app.css'],
+        javascript: ['assets/app.js'],
         devEntrypoint: '/src/main.ts',
         startHtml: '<demo-app><main id="content"></main></demo-app>',
     ),
@@ -24,9 +24,20 @@ $app->addMiddleware(new SpaStaticFileServerMw(
 ));
 ```
 
+`SpaStaticFileServerMw` uses `BraceApp::$appBasePath` as its mount by default in development and production and passes the application URLs to `ViteAutoHtml`. Vite forwards navigation paths unchanged, so the application base path remains effective during development. Requests outside the configured path receive a descriptive 404 response. Pass `mount` explicitly to override the SPA mount. Relative asset paths such as `assets/app.js` are resolved below the effective application base path.
+
+The generated HTML exposes two independent frontend settings:
+
+```html
+<meta name="app-base-path" content="/demo/">
+<meta name="api-base-url" content="https://api.example.test/v1">
+```
+
+`app-base-path` controls frontend routing, navigation and links. `api-base-url` controls API requests and may point to a different path or server. When `BraceApp::$apiBaseUrl` is omitted, it defaults to the application base path. An explicit API client configuration still has the highest priority.
+
 Run Brace on port 8080 and Vite on port 4000; open the **Vite** URL in the browser. The example in [`examples/demo`](examples/demo) shows its Vite configuration, source entrypoint and `npm run dev` / `npm run build` scripts. The build emits `dist/assets/app.js` and `dist/assets/app.css`; pass the actual asset paths to `ViteAutoHtml` if your build differs. In development the bundle directory need not exist. In production it must exist before Brace starts. Backend routes under `excludePaths` continue to the next middleware. Missing asset paths return 404; navigation paths return the SPA shell.
 
-`ViteAutoHtml` also supports `basePath`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startHtml`. `startHtml` is trusted application HTML and is inserted unchanged at the beginning of `<body>`, before the generated module scripts. It can therefore contain complete nested startup markup instead of describing only one element. It must not contain untrusted user input. ViteAutoHtml emits `/@vite/client` and `devEntrypoint` in development, and the configured CSS/JavaScript bundle in production. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
+`ViteAutoHtml` also supports `appBasePath`, `apiBaseUrl`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startHtml`. `startHtml` is trusted application HTML and is inserted unchanged at the beginning of `<body>`, before the generated module scripts. It can therefore contain complete nested startup markup instead of describing only one element. It must not contain untrusted user input. ViteAutoHtml emits `/@vite/client` and `devEntrypoint` in development, and the configured CSS/JavaScript bundle in production. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
 
 ## Typed API stub
 
