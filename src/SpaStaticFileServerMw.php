@@ -6,6 +6,7 @@ namespace Brace\SpaServe;
 
 use Brace\Core\Base\BraceAbstractMiddleware;
 use Brace\Core\BraceApp;
+use Brace\Core\EnvironmentType;
 use Brace\SpaServe\Html\HtmlGenerator;
 use Brace\SpaServe\Html\ViteAutoHtml;
 use Brace\SpaServe\Tools\MimeMap;
@@ -17,8 +18,10 @@ use Psr\Http\Server\RequestHandlerInterface;
 /** Serves the SPA shell and, in production, the files emitted by Vite. */
 final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 {
-    private ?PhoreDirectory $bundleDir;
-    private bool $development;
+    private ?PhoreDirectory $bundleDir = null;
+    private bool $development = false;
+    private PhoreDirectory|string $configuredBundleDir;
+    private ?bool $configuredDevelopment;
     private ?string $configuredMount;
     public string $mount;
 
@@ -41,20 +44,29 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         public HtmlGenerator $html,
         ?string $mount = null,
         public array $excludePaths = ['/api'],
+        public string $apiMountPath = '/api',
     ) {
         $this->configuredMount = $mount;
         $this->mount = $this->normalizeMount($mount ?? '/');
-        $this->development = $html instanceof ViteAutoHtml && $html->development;
-        $this->bundleDir = $this->development ? null : phore_dir($bundleDir)->assertDirectory();
+        $this->configuredBundleDir = $bundleDir;
+        $this->configuredDevelopment = $html instanceof ViteAutoHtml ? $html->development : false;
     }
 
     public function _setApp(BraceApp $app): void
     {
         parent::_setApp($app);
-        $this->mount = $this->normalizeMount($this->configuredMount ?? $app->appBasePath);
+        $this->mount = $this->normalizeMount($this->configuredMount ?? $app->url_prefix);
+        $this->development = $this->configuredDevelopment
+            ?? ($app->environmentType === EnvironmentType::DEVELOPMENT);
+        $this->bundleDir = $this->development ? null : phore_dir($this->configuredBundleDir)->assertDirectory();
         if ($this->html instanceof ViteAutoHtml) {
-            $this->html->setApplicationUrls($this->mount, $app->apiBaseUrl);
+            $this->html->development = $this->development;
+            $this->html->setApplicationUrls(
+                $this->mount,
+                rtrim($this->mount, '/') . '/' . trim($this->apiMountPath, '/'),
+            );
         }
+        $this->html->meta['app-env'] = $app->environmentType->value;
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
@@ -116,7 +128,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         }
 
         return $this->app->responseFactory->createResponseWithBody(
-            $file->get_contents(),
+            $file->asFile()->get_contents(),
             200,
             ['Content-Type' => MimeMap::fromExtension($file->getExtension())],
         );

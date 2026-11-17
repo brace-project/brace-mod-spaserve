@@ -8,6 +8,7 @@ final class ViteAutoHtml extends HtmlGenerator
 {
     /** @var array<string, scalar|null> */
     private array $configuredMeta;
+    private string $configuredApiBaseUrl;
     /** @var list<string> */
     private array $configuredCss;
     /** @var list<string> */
@@ -29,8 +30,8 @@ final class ViteAutoHtml extends HtmlGenerator
      * @param string|null $startHtml Trusted application HTML inserted at the start of <body>.
      */
     public function __construct(
-        public bool $development,
-        public string $appBasePath = '/',
+        public ?bool $development = null,
+        public string $url_prefix = '/',
         public string $apiBaseUrl = '',
         string $title = '',
         array $meta = [],
@@ -43,20 +44,26 @@ final class ViteAutoHtml extends HtmlGenerator
         public ?string $devEntrypoint = '/src/main.ts',
     ) {
         $this->configuredMeta = $meta;
+        $this->configuredApiBaseUrl = $apiBaseUrl;
         $this->configuredCss = $css;
         $this->configuredJavascript = $javascript;
         $this->additionalCss = $additionalCss;
         $this->additionalJavascript = $additionalJavascript;
 
         parent::__construct(title: $title, startHtml: $startHtml);
-        $this->setApplicationUrls($appBasePath, $apiBaseUrl);
+        $this->setApplicationUrls($url_prefix);
     }
 
-    public function setApplicationUrls(string $appBasePath, string $apiBaseUrl = ''): void
+    public function setApplicationUrls(string $url_prefix, string $defaultApiBaseUrl = ''): void
     {
-        $appBasePath = $this->normalizeBasePath($appBasePath);
-        $this->appBasePath = $appBasePath;
-        $this->apiBaseUrl = $apiBaseUrl !== '' ? rtrim($apiBaseUrl, '/') : rtrim($appBasePath, '/');
+        $url_prefix = $this->normalizeBasePath($url_prefix);
+        $this->url_prefix = $url_prefix;
+        $this->apiBaseUrl = rtrim(
+            $this->configuredApiBaseUrl !== ''
+                ? $this->configuredApiBaseUrl
+                : ($defaultApiBaseUrl !== '' ? $defaultApiBaseUrl : rtrim($url_prefix, '/') . '/api'),
+            '/',
+        );
 
         $resolvedCss = $this->development ? $this->additionalCss : [...$this->configuredCss, ...$this->additionalCss];
         $resolvedJavascript = $this->development
@@ -68,11 +75,11 @@ final class ViteAutoHtml extends HtmlGenerator
             : [...$this->configuredJavascript, ...$this->additionalJavascript];
 
         $this->meta = array_merge([
-            'app-base-path' => $appBasePath,
+            'app-base-path' => $url_prefix,
             'api-base-url' => $this->apiBaseUrl,
         ], $this->configuredMeta);
-        $this->css = array_map(fn (string $path) => $this->resolvePath($path, $appBasePath), $resolvedCss);
-        $this->javascript = array_map(fn (string $path) => $this->resolvePath($path, $appBasePath), $resolvedJavascript);
+        $this->css = array_map(fn (string $path) => $this->resolvePath($path, $url_prefix), $resolvedCss);
+        $this->javascript = array_map(fn (string $path) => $this->resolvePath($path, $url_prefix), $resolvedJavascript);
     }
 
     private function normalizeBasePath(string $basePath): string
