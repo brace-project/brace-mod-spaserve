@@ -66,9 +66,11 @@ the domain root and under the effective SPA mount. The default HTML generator
 emits `/@vite/client` and `/src/main.ts` at the domain root, even with a `/demo`
 mount. Custom local `devViteClient` and `devEntrypoint` URLs are also recognized
 in development: relative URLs use the mount, while paths starting with `/` retain
-their location. Dot segments in configured URLs follow browser resolution; incoming
-traversal requests remain rejected. Query strings and fragments are ignored for
-the diagnostic route comparison. Full external URLs and protocol-relative URLs
+their location. Configured local path components are normalized with
+`phore_uri($path)->clean()->getUri()`: literal `.` and `..` segments are resolved,
+and redundant or trailing slashes are removed. Percent-encoded dot segments are
+not resolved by `clean()`; incoming traversal requests remain rejected. Query
+strings and fragments are ignored for the diagnostic route comparison. Full external URLs and protocol-relative URLs
 do not reserve a corresponding local path.
 
 Production returns a generic 404 for the reserved Vite paths. Ordinary source
