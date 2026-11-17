@@ -22,7 +22,7 @@
     "require-dev": {
         "brace/mod-router": "*",
         "brace/mod-request-laminas": "*",
-        "phore/tester": "*",
+        "phpunit/phpunit": "^12.5",
         "phpspec/phpspec": "^7.5 || ^8.0"
     },
     "autoload": {
@@ -35,7 +35,9 @@
         "psr-4": {}
     },
     "scripts": {
-        "test": "phpspec run"
+        "test": ["@test:security", "@test:spec"],
+        "test:spec": "phpspec run",
+        "test:security": "phpunit --configuration phpunit.security.xml --display-deprecations"
     },
     "minimum-stability": "dev",
     "extra": {

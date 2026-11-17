@@ -7,6 +7,7 @@ namespace spec\Brace\SpaServe\Codegen;
 use Brace\Core\BraceApp;
 use Brace\Core\EnvironmentType;
 use Brace\Router\RouterModule;
+use Brace\SpaServe\Codegen\TypeScriptApiGeneratorModule;
 use Brace\SpaServe\Codegen\GeneratedFileWriter;
 use Brace\SpaServe\Codegen\TypeScriptApiStubGenerator;
 use PhpSpec\ObjectBehavior;
@@ -113,10 +114,9 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
     public function it_never_generates_during_module_registration_in_any_environment(): void
     {
         foreach (EnvironmentType::cases() as $environment) {
-            $this->beConstructedWith($this->targetFile);
             $app = $this->app($environment);
             $app->router->on('GET@/api/users/:userId', static fn (int $userId): string => (string)$userId, [], 'User.Get');
-            $this->register($app);
+            $app->addModule(new TypeScriptApiGeneratorModule($this->targetFile));
             if (is_file($this->targetFile)) throw new RuntimeException('Module registration generated the stub in ' . $environment->value);
         }
     }

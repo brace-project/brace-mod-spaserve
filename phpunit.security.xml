@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Security-sensitive test discovery and failure policy; see AGENTS.md. -->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/12.5/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         cacheResult="false"
+         colors="true"
+         failOnEmptyTestSuite="true"
+         failOnIncomplete="true"
+         failOnSkipped="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         failOnNotice="true"
+         failOnPhpunitWarning="true"
+         beStrictAboutOutputDuringTests="true">
+    <testsuites>
+        <testsuite name="SPA security">
+            <directory suffix="SecurityTest.php">tests</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
