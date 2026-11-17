@@ -12,7 +12,6 @@ $app->router->on('GET@/api/users/:userId', $callback, [], 'User.Get');
 
 $app->addModule(new TypeScriptApiGeneratorModule(
     targetFile: __DIR__ . '/src/generated-api.ts',
-    autoGenerateInDevelopment: true,
 ));
 
 // Insert this after the Brace API routes; Vite proxies /api to Brace.

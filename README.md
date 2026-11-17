@@ -59,7 +59,6 @@ $app->router->on(
 
 $app->addModule(new TypeScriptApiGeneratorModule(
     targetFile: __DIR__ . '/frontend/src/generated-api.ts',
-    autoGenerateInDevelopment: false, // Default: rebuild explicitly or through Vite.
 ));
 ```
 
@@ -69,7 +68,7 @@ The module makes Brace Command available when necessary and registers `spa-api-b
 vendor/bin/brace spa-api-build
 ```
 
-`autoGenerateInDevelopment` defaults to `false`: normal application requests do not rebuild the stub. Rebuild explicitly with `spa-api-build` or use the Vite workflow below. Setting `autoGenerateInDevelopment: true` opts back into generation during normal application bootstrap when `$app->environmentType === EnvironmentType::DEVELOPMENT`. Production and test environments never auto-generate, and CLI startup does not generate until `spa-api-build` is actually executed.
+Stub generation is driven by Vite through the `spa-api-build` command: on development-server startup, backend hot updates and production builds. Module registration and HTTP requests never generate stubs; there is no on-request generation option. Run the command above manually when needed. Generated output includes named routes, their typed parameters and response DTOs; unnamed routes are ignored. See the Vite workflow below.
 
 The registered route callback's parameter and return types (including PHPDoc collection types) are read with `phore/schema`. Router parameters such as `:userId` become path parameters, while other callback parameters become query parameters. Public DTO properties become TypeScript interfaces. `GeneratedFileWriter` compares the generated content and only replaces the target file when it changed, so repeated generation does not trigger Vite HMR or reloads unnecessarily.
 

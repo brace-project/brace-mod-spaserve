@@ -25,7 +25,6 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
             new SchemaParser(),
             new TypeScriptApiStubGenerator(),
             new GeneratedFileWriter(),
-            false,
         );
     }
 
@@ -58,7 +57,6 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
             new SchemaParser(),
             new TypeScriptApiStubGenerator(),
             new GeneratedFileWriter(),
-            false,
             'spa-api-build',
             '/api',
         );
@@ -98,16 +96,8 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
         }
     }
 
-    public function it_disables_automatic_generation_by_default(): void
+    public function it_only_generates_when_the_build_command_is_executed(): void
     {
-        $parameter = (new \ReflectionMethod(
-            \Brace\SpaServe\Codegen\TypeScriptApiGeneratorModule::class,
-            '__construct',
-        ))->getParameters()[4];
-        if ($parameter->getDefaultValue() !== false) {
-            throw new RuntimeException('Automatic generation must be disabled by default.');
-        }
-
         $this->beConstructedWith($this->targetFile);
         $app = $this->app(EnvironmentType::DEVELOPMENT);
         $app->router->on('GET@/health', static fn (): string => 'ok', [], 'Health');
@@ -120,19 +110,15 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
         }
     }
 
-    public function it_does_not_auto_generate_during_cli_bootstrap(): void
+    public function it_never_generates_during_module_registration_in_any_environment(): void
     {
-        $this->beConstructedWith(
-            $this->targetFile,
-            new SchemaParser(),
-            new TypeScriptApiStubGenerator(),
-            new GeneratedFileWriter(),
-            true,
-        );
-        $app = $this->app(EnvironmentType::DEVELOPMENT);
-        $app->router->on('GET@/api/users/:userId', static fn (int $userId): string => (string)$userId, [], 'User.Get');
-        $this->register($app);
-        if (is_file($this->targetFile)) throw new RuntimeException('CLI bootstrap generated the stub before spa-api-build was executed.');
+        foreach (EnvironmentType::cases() as $environment) {
+            $this->beConstructedWith($this->targetFile);
+            $app = $this->app($environment);
+            $app->router->on('GET@/api/users/:userId', static fn (int $userId): string => (string)$userId, [], 'User.Get');
+            $this->register($app);
+            if (is_file($this->targetFile)) throw new RuntimeException('Module registration generated the stub in ' . $environment->value);
+        }
     }
 
     private function app(EnvironmentType $environment = EnvironmentType::PRODUCTION, string $url_prefix = ''): BraceApp

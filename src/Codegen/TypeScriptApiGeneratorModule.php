@@ -7,7 +7,6 @@ namespace Brace\SpaServe\Codegen;
 use Brace\Command\CommandModule;
 use Brace\Core\BraceApp;
 use Brace\Core\BraceModule;
-use Brace\Core\EnvironmentType;
 use Phore\Schema\Parser\SchemaParser;
 use Phore\Schema\Schema\ClassSchema;
 use Phore\Schema\Schema\FunctionSchema;
@@ -26,7 +25,6 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         private readonly SchemaParser $schemaParser = new SchemaParser(),
         private readonly TypeScriptApiStubGenerator $generator = new TypeScriptApiStubGenerator(),
         private readonly GeneratedFileWriter $writer = new GeneratedFileWriter(),
-        private readonly bool $autoGenerateInDevelopment = false,
         private readonly string $commandName = 'spa-api-build',
         private readonly string $apiMountPath = '',
     ) {
@@ -48,14 +46,6 @@ final class TypeScriptApiGeneratorModule implements BraceModule
             },
             'Generate the TypeScript API stub from named router routes',
         );
-
-        if (
-            $this->autoGenerateInDevelopment
-            && $app->environmentType === EnvironmentType::DEVELOPMENT
-            && PHP_SAPI !== 'cli'
-        ) {
-            $this->load();
-        }
     }
 
     /** Safe to call on every application load. Returns true iff the target file was actually replaced. */
