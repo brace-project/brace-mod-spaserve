@@ -97,7 +97,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             $this->html->development = $this->development;
             $this->html->setApplicationUrls(
                 $this->mount,
-                rtrim($this->mount, '/') . '/' . trim($this->apiMountPath, '/'),
+                phore_uri($this->mount . '/' . trim($this->apiMountPath, '/'))->clean()->getUri(),
             );
         }
         $this->html->meta['app-env'] = $app->environmentType->value;
@@ -268,13 +268,17 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
-        // Auch ein erlaubter interner Symlink darf keine private Datei freigeben.
+        // Auch das reale Symlink-Ziel muss innerhalb der Bundle-Root öffentlich sein.
         $resolved = realpath((string) $file);
-        $rootPrefix = rtrim($this->bundleRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         if ($resolved === false) {
             return $this->errorResponse($request, 500, 'Unable to read the SPA asset.');
         }
-        if (!str_starts_with($resolved, $rootPrefix) || !$this->isPublicAssetPath(substr($resolved, strlen($rootPrefix)))) {
+        try {
+            $resolvedRelative = phore_uri($resolved)->rel($this->bundleRoot)->getUri();
+        } catch (\InvalidArgumentException) {
+            return $this->errorResponse($request, 404, 'SPA asset not found.');
+        }
+        if ($resolvedRelative === '.' || !$this->isPublicAssetPath($resolvedRelative)) {
             return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
@@ -529,18 +533,18 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         // Genau einmal dekodieren; mehrdeutige Rest-Escapes nicht weiterreichen.
         if (
             !str_starts_with($path, '/')
-            || str_contains($path, '//')
-            || strpbrk($path, "\\?#") !== false
+            || strpbrk($path, '?#') !== false
             || preg_match('/[\x00-\x1f\x7f]|%[0-9a-f]{2}/i', $path)
             || preg_match('//u', $path) !== 1
         ) {
             return null;
         }
 
-        foreach (explode('/', $path) as $segment) {
-            if ($segment === '.' || $segment === '..') {
-                return null;
-            }
+        // Lexikalische URI-Policy liegt in Phore; Requests werden nie bereinigt.
+        try {
+            phore_uri($path)->assertClean();
+        } catch (PathOutOfBoundsException) {
+            return null;
         }
 
         return $path;
@@ -596,7 +600,11 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
     private function relativePath(string $path): string
     {
-        return ltrim($this->mount === '/' ? $path : substr($path, strlen($this->mount)), '/');
+        $relative = phore_uri($path)->rel($this->mount)->getUri();
+        if ($relative === '.') {
+            return '';
+        }
+        return $relative . (str_ends_with($path, '/') ? '/' : '');
     }
 
     private function normalizeMount(string $mount): string
@@ -607,9 +615,9 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
     private function resolveExcludedPath(string $path): string
     {
         $path = $this->normalizeMount($path);
-        if ($this->mount === '/' || $path === $this->mount || str_starts_with($path, $this->mount . '/')) {
+        if ($this->isMountedPath($path)) {
             return $path;
         }
-        return $this->mount . $path;
+        return phore_uri($this->mount . $path)->clean()->getUri();
     }
 }
