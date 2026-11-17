@@ -186,11 +186,17 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
     private function tryStaticFile(string $relativePath, ServerRequestInterface $request): ?ResponseInterface
     {
-        $file = $this->bundleDir->withSubPath($relativePath);
-        if (!$file->exists()) {
-            return null;
-        }
-        if (!$file->isFile()) {
+        // Nicht auflösbare Links sind keine auslieferbaren Ressourcen. Fehler
+        // beim anschließenden Lesen bleiben davon getrennte Serverfehler.
+        try {
+            $file = $this->bundleDir->withSubPath($relativePath);
+            if (!$file->exists()) {
+                return null;
+            }
+            if (!$file->isFile()) {
+                return $this->errorResponse($request, 404, 'SPA asset not found.');
+            }
+        } catch (FilesystemException) {
             return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 

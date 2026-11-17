@@ -37,7 +37,7 @@
     "scripts": {
         "test": ["@test:security", "@test:spec"],
         "test:spec": "phpspec run",
-        "test:security": "phpunit --configuration phpunit.security.xml"
+        "test:security": "phpunit --configuration phpunit.security.xml --display-deprecations"
     },
     "minimum-stability": "dev",
     "extra": {
