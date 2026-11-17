@@ -22,7 +22,7 @@ final class TypeScriptApiStubGenerator
      * @param list<ClassSchema> $classes
      * @return string Generated TypeScript module.
      * @throws \InvalidArgumentException When route names conflict or DTO names are ambiguous.
-     * @see \Brace\SpaServe\Codegen\TypeScriptApiStubModule::load()
+     * @see \Brace\SpaServe\Codegen\TypeScriptApiGeneratorModule::load()
      * @example $source = $generator->generate([['name' => 'User.Get', 'path' => '/api/users/{id}', 'methods' => ['GET'], 'response' => $schema]]);
      */
     public function generate(array $routes, array $classes = []): string

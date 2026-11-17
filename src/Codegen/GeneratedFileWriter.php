@@ -17,11 +17,12 @@ final class GeneratedFileWriter
         $dir = dirname($targetFile);
         if (!is_dir($dir) && !mkdir($dir, 0777, true) && !is_dir($dir)) throw new RuntimeException("Cannot create output directory: $dir");
 
-        $tmp = tempnam($dir, '.' . basename($targetFile) . '.tmp-');
-        if ($tmp === false) throw new RuntimeException("Cannot create temporary file in: $dir");
+        $tmpDir = sys_get_temp_dir();
+        $tmp = tempnam($tmpDir, basename($targetFile) . '.tmp-');
+        if ($tmp === false) throw new RuntimeException("Cannot create temporary file in: $tmpDir");
         try {
             if (file_put_contents($tmp, $contents, LOCK_EX) === false) throw new RuntimeException("Cannot write generated file: $tmp");
-            if (!rename($tmp, $targetFile)) throw new RuntimeException("Cannot replace generated file: $targetFile");
+            if (file_put_contents($targetFile, $contents, LOCK_EX) === false) throw new RuntimeException("Cannot replace generated file: $targetFile");
         } finally {
             if (is_file($tmp)) @unlink($tmp);
         }

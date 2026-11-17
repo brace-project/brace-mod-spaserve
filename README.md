@@ -30,26 +30,22 @@ Run Brace on port 8080 and Vite on port 4000; open the **Vite** URL in the brows
 
 ## Typed API stub
 
-`TypeScriptApiStubModule` handles the complete Brace integration for API-stub generation. Configure the target file and routes, then add the module to the application:
+`TypeScriptApiGeneratorModule` handles the complete Brace integration for API-stub generation. It reads every named route already registered on the Brace router; unnamed routes are ignored:
 
 ```php
-use Brace\SpaServe\Codegen\TypeScriptApiStubModule;
+use Brace\SpaServe\Codegen\TypeScriptApiGeneratorModule;
 
-$callback = [UserController::class, 'get'];
-$app->router->on('GET@/api/users/:userId', $callback);
+$app->router->on(
+    'GET@/api/users/:userId',
+    [UserController::class, 'get'],
+    [],
+    'User.Get',
+);
 
-$api = new TypeScriptApiStubModule(
+$app->addModule(new TypeScriptApiGeneratorModule(
     targetFile: __DIR__ . '/frontend/src/generated-api.ts',
     autoGenerateInDevelopment: true,
-);
-$api->route(
-    name: 'User.Get',
-    path: '/api/users/{userId}',
-    methods: 'GET',
-    callback: $callback,
-);
-
-$app->addModule($api);
+));
 ```
 
 The module makes Brace Command available when necessary and registers `spa-api-build` itself. The configured stub can therefore be generated through the normal Brace CLI without an additional build PHP file:
@@ -60,7 +56,7 @@ vendor/bin/brace spa-api-build
 
 With `autoGenerateInDevelopment: true`, generation also runs during normal application bootstrap when `$app->environmentType === EnvironmentType::DEVELOPMENT`. Set the option to `false` to disable this automatic path. Production and test environments never auto-generate, and CLI startup does not generate until `spa-api-build` is actually executed.
 
-The PHP callback's parameter and return types (including PHPDoc collection types) are read with `phore/schema`. A parameter named in `{braces}` becomes a path parameter, other parameters become query parameters, and `bodyParameter: 'data'` marks a JSON request body. Public DTO properties become TypeScript interfaces. `GeneratedFileWriter` compares the generated content and only replaces the target file when it changed, so repeated generation does not trigger Vite HMR or reloads unnecessarily.
+The registered route callback's parameter and return types (including PHPDoc collection types) are read with `phore/schema`. Router parameters such as `:userId` become path parameters, while other callback parameters become query parameters. Public DTO properties become TypeScript interfaces. `GeneratedFileWriter` compares the generated content and only replaces the target file when it changed, so repeated generation does not trigger Vite HMR or reloads unnecessarily.
 
 ### Vite integration
 
@@ -82,7 +78,7 @@ export default defineConfig({
 });
 ```
 
-No Brace-specific Vite plugin or separate API build entrypoint is required. If the Vite project is located in a subdirectory, adjust only the relative path to `vendor/bin/brace`; the output path remains configured once in `TypeScriptApiStubModule`.
+No Brace-specific Vite plugin or separate API build entrypoint is required. If the Vite project is located in a subdirectory, adjust only the relative path to `vendor/bin/brace`; the output path remains configured once in `TypeScriptApiGeneratorModule`.
 
 The generated source imports `createApi` and `ApiRoute` from `@trunkjs/api-stub`. It contains nested TypeScript route names and a compact flat route table for the runtime:
 
