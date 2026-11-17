@@ -10,14 +10,14 @@ class HtmlGenerator
      * @param array<string, scalar|null> $meta
      * @param list<string> $css
      * @param list<string> $javascript
-     * @param string|array{tag:string, attributes?:array<string, scalar|null>}|null $startElement
+     * @param string|null $startHtml Trusted application HTML inserted at the start of <body>.
      */
     public function __construct(
         public string $title = '',
         public array $meta = [],
         public array $css = [],
         public array $javascript = [],
-        public string|array|null $startElement = null,
+        public ?string $startHtml = null,
     ) {
     }
 
@@ -29,8 +29,10 @@ class HtmlGenerator
         ];
 
         foreach ($this->meta as $name => $value) {
-            if ($value === null) continue;
-            $head[] = sprintf('<meta name="%s" content="%s">', $this->escape((string)$name), $this->escape((string)$value));
+            if ($value === null) {
+                continue;
+            }
+            $head[] = sprintf('<meta name="%s" content="%s">', $this->escape((string) $name), $this->escape((string) $value));
         }
 
         if ($this->title !== '') {
@@ -42,8 +44,8 @@ class HtmlGenerator
         }
 
         $body = [];
-        if ($this->startElement !== null) {
-            $body[] = $this->renderStartElement($this->startElement);
+        if ($this->startHtml !== null) {
+            $body[] = $this->startHtml;
         }
 
         foreach ($this->javascript as $src) {
@@ -55,31 +57,6 @@ class HtmlGenerator
             . "\n</head>\n<body>\n    "
             . implode("\n    ", $body)
             . "\n</body>\n</html>\n";
-    }
-
-    /** @param string|array{tag:string, attributes?:array<string, scalar|null>} $element */
-    private function renderStartElement(string|array $element): string
-    {
-        if (is_string($element)) {
-            return sprintf('<%1$s></%1$s>', $this->escapeTag($element));
-        }
-
-        $tag = $this->escapeTag($element['tag']);
-        $attributes = [];
-        foreach ($element['attributes'] ?? [] as $name => $value) {
-            if ($value === null) continue;
-            $attributes[] = sprintf('%s="%s"', $this->escape((string)$name), $this->escape((string)$value));
-        }
-
-        return sprintf('<%1$s%2$s></%1$s>', $tag, $attributes === [] ? '' : ' ' . implode(' ', $attributes));
-    }
-
-    private function escapeTag(string $tag): string
-    {
-        if (!preg_match('/^[a-z][a-z0-9._-]*$/i', $tag)) {
-            throw new \InvalidArgumentException("Invalid start element tag: {$tag}");
-        }
-        return $tag;
     }
 
     private function escape(string $value): string

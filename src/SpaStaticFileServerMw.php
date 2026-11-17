@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Brace\SpaServe;
 
 use Brace\Core\Base\BraceAbstractMiddleware;
+use Brace\Core\BraceApp;
+use Brace\Core\EnvironmentType;
 use Brace\SpaServe\Html\HtmlGenerator;
 use Brace\SpaServe\Html\ViteAutoHtml;
 use Brace\SpaServe\Tools\MimeMap;
@@ -16,8 +18,12 @@ use Psr\Http\Server\RequestHandlerInterface;
 /** Serves the SPA shell and, in production, the files emitted by Vite. */
 final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 {
-    private ?PhoreDirectory $bundleDir;
-    private bool $development;
+    private ?PhoreDirectory $bundleDir = null;
+    private bool $development = false;
+    private PhoreDirectory|string $configuredBundleDir;
+    private ?bool $configuredDevelopment;
+    private ?string $configuredMount;
+    public string $mount;
 
     /**
      * Configure SPA delivery after the application's API middleware.
@@ -36,25 +42,48 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
     public function __construct(
         PhoreDirectory|string $bundleDir,
         public HtmlGenerator $html,
-        public string $mount = '/',
+        ?string $mount = null,
         public array $excludePaths = ['/api'],
+        public string $apiMountPath = '/api',
     ) {
-        $this->mount = $this->normalizeMount($mount);
-        $this->development = $html instanceof ViteAutoHtml && $html->development;
-        $this->bundleDir = $this->development ? null : phore_dir($bundleDir)->assertDirectory();
+        $this->configuredMount = $mount;
+        $this->mount = $this->normalizeMount($mount ?? '/');
+        $this->configuredBundleDir = $bundleDir;
+        $this->configuredDevelopment = $html instanceof ViteAutoHtml ? $html->development : false;
+    }
+
+    public function _setApp(BraceApp $app): void
+    {
+        parent::_setApp($app);
+        $this->mount = $this->normalizeMount($this->configuredMount ?? $app->url_prefix);
+        $this->development = $this->configuredDevelopment
+            ?? ($app->environmentType === EnvironmentType::DEVELOPMENT);
+        $this->bundleDir = $this->development ? null : phore_dir($this->configuredBundleDir)->assertDirectory();
+        if ($this->html instanceof ViteAutoHtml) {
+            $this->html->development = $this->development;
+            $this->html->setApplicationUrls(
+                $this->mount,
+                rtrim($this->mount, '/') . '/' . trim($this->apiMountPath, '/'),
+            );
+        }
+        $this->html->meta['app-env'] = $app->environmentType->value;
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $path = $request->getUri()->getPath();
         foreach ($this->excludePaths as $excludePath) {
-            $excludePath = $this->normalizeMount($excludePath);
+            $excludePath = $this->resolveExcludedPath($excludePath);
             if ($path === $excludePath || str_starts_with($path, $excludePath . '/')) {
                 return $handler->handle($request);
             }
         }
         if (!$this->isMountedPath($path)) {
-            return $handler->handle($request);
+            return $this->app->responseFactory->createResponseWithBody(
+                sprintf('SPA is mounted at "%s". Requested path "%s" is outside the configured URL prefix.', $this->mount, $path),
+                404,
+                ['Content-Type' => 'text/plain; charset=utf-8'],
+            );
         }
 
         $relativePath = $this->relativePath($path);
@@ -99,7 +128,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         }
 
         return $this->app->responseFactory->createResponseWithBody(
-            $file->get_contents(),
+            $file->asFile()->get_contents(),
             200,
             ['Content-Type' => MimeMap::fromExtension($file->getExtension())],
         );
@@ -118,5 +147,14 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
     private function normalizeMount(string $mount): string
     {
         return '/' . trim($mount, '/');
+    }
+
+    private function resolveExcludedPath(string $path): string
+    {
+        $path = $this->normalizeMount($path);
+        if ($this->mount === '/' || $path === $this->mount || str_starts_with($path, $this->mount . '/')) {
+            return $path;
+        }
+        return $this->mount . $path;
     }
 }
