@@ -44,8 +44,8 @@ Run Brace on port 8080 and Vite on port 4000; open the **Vite** URL in the brows
 `ViteAutoHtml` also supports `appBasePath`, `apiBaseUrl`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startHtml`. `startHtml` is trusted application HTML and is inserted unchanged at the beginning of `<body>`, before the generated module scripts. It can therefore contain complete nested startup markup instead of describing only one element. It must not contain untrusted user input. ViteAutoHtml emits `/@vite/client` and `devEntrypoint` in development, and the configured CSS/JavaScript bundle in production. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
 
 The middleware rejects unclean, once-decoded incoming URL paths with
-`phore_uri($path)->assertClean()`; it never repairs user-supplied traversal.
-This API comes from [phore/filesystem PR #4](https://github.com/phore/phore-filesystem/pull/4).
+`phore_uri($path)->isClean()`; it never repairs user-supplied traversal.
+This API comes from [phore/filesystem PR #5](https://github.com/phore/phore-filesystem/pull/5).
 For trusted configuration paths it continues using `clean()`. Relative
 mount paths and resolved filesystem root boundaries use `PhoreUri::rel()`;
 the public-file policy and HTTP encoding checks remain separate.

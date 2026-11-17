@@ -540,14 +540,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             return null;
         }
 
-        // Lexikalische URI-Policy liegt in Phore; Requests werden nie bereinigt.
-        try {
-            phore_uri($path)->assertClean();
-        } catch (PathOutOfBoundsException) {
-            return null;
-        }
-
-        return $path;
+        // Unsaubere Request-Pfade ablehnen, nicht normalisieren.
+        return phore_uri($path)->isClean() ? $path : null;
     }
 
     private function isPublicAssetPath(string $path): bool
