@@ -249,13 +249,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         }
 
         // Nur konfigurierte URL-Pfade bereinigen; Requests bleiben strikt validiert.
-        try {
-            $path = phore_uri($path)->clean(urlPath: true)->getUri();
-        } catch (\InvalidArgumentException) {
-            return null;
-        }
-
-        return $this->decodeRequestPath($path);
+        return $this->decodeRequestPath(phore_uri($path)->clean()->getUri());
     }
 
     private function tryStaticFile(string $relativePath, ServerRequestInterface $request): ?ResponseInterface
@@ -607,7 +601,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
     private function normalizeMount(string $mount): string
     {
-        return '/' . trim($mount, '/');
+        return phore_uri('/' . $mount)->clean()->getUri();
     }
 
     private function resolveExcludedPath(string $path): string

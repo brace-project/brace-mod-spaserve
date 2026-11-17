@@ -63,7 +63,7 @@ final class TypeScriptApiGeneratorModule implements BraceModule
             if ($prefix !== '' && ($path === $prefix || str_starts_with($path, $prefix . '/'))) {
                 $path = substr($path, strlen($prefix)) ?: '/';
             }
-            $apiMountPath = '/' . trim($this->apiMountPath, '/');
+            $apiMountPath = phore_uri('/' . $this->apiMountPath)->clean()->getUri();
             if ($apiMountPath !== '/' && ($path === $apiMountPath || str_starts_with($path, $apiMountPath . '/'))) {
                 $path = substr($path, strlen($apiMountPath)) ?: '/';
             }

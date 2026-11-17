@@ -84,7 +84,7 @@ final class ViteAutoHtml extends HtmlGenerator
 
     private function normalizeBasePath(string $basePath): string
     {
-        $basePath = '/' . trim($basePath, '/');
+        $basePath = phore_uri('/' . $basePath)->clean()->getUri();
         return $basePath === '/' ? '/' : $basePath . '/';
     }
 
