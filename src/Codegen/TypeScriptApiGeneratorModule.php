@@ -57,16 +57,12 @@ final class TypeScriptApiGeneratorModule implements BraceModule
 
         $routes = [];
         $classes = [];
+        $routerPrefix = $this->app->router->getPrefix();
+        $apiMountPath = phore_uri('/' . $this->apiMountPath)->formatUri(trailingSlash: false);
         foreach ($this->app->router->getNamedRoutes() as $route) {
             [$methods, $path] = explode('@', $route['route'], 2);
-            $prefix = $this->app->router->getPrefix();
-            if ($prefix !== '' && ($path === $prefix || str_starts_with($path, $prefix . '/'))) {
-                $path = substr($path, strlen($prefix)) ?: '/';
-            }
-            $apiMountPath = '/' . trim($this->apiMountPath, '/');
-            if ($apiMountPath !== '/' && ($path === $apiMountPath || str_starts_with($path, $apiMountPath . '/'))) {
-                $path = substr($path, strlen($apiMountPath)) ?: '/';
-            }
+            $path = $this->stripPathPrefix($path, $routerPrefix);
+            $path = $this->stripPathPrefix($path, $apiMountPath);
             $path = preg_replace_callback('/::?([A-Za-z_][A-Za-z0-9_]*)/', static fn (array $match): string => '{' . $match[1] . '}', $path) ?? $path;
             $function = $this->parseCallback($route['call']);
             preg_match_all('/\{([A-Za-z_][A-Za-z0-9_]*)\}/', $path, $matches);
@@ -96,6 +92,22 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         }
         ksort($classes);
         return $this->writer->writeIfChanged($this->targetFile, $this->generator->generate($routes, array_values($classes)));
+    }
+
+    private function stripPathPrefix(string $path, string $prefix): string
+    {
+        if (
+            $prefix === ''
+            || $prefix === '/'
+            || ($path !== $prefix && !str_starts_with($path, $prefix . '/'))
+        ) {
+            return $path;
+        }
+
+        // Segmentgrenzen zuerst prüfen, dann relative URL-Form erzeugen.
+        return phore_uri($path)
+            ->rel($prefix)
+            ->formatUri(leadingSlash: true, trailingSlash: str_ends_with($path, '/'));
     }
 
     private function parseCallback(mixed $callback): FunctionSchema

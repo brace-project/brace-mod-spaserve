@@ -30,6 +30,7 @@ as successful security assertions.
 | Fallback | Legitimate client-side routes can receive the SPA; unsafe paths and missing assets must not turn into successful HTML responses. |
 | HTML negotiation | Accept quality/specificity, charset parameters, quoted values, repeated fields, malformed or oversized headers and Fetch destinations must not turn CSS/JavaScript requests into HTML. |
 | Asset diagnostics | Missing resources identify only the encoded public URL directory and a fixed resource hint; never echo query values, attack markup or local filesystem paths. |
+| Vite routing | Recognized development resources return a fixed 500 routing diagnostic before file access or rendering; reserved Vite endpoints return generic 404 in production. |
 | HTTP behavior | Supported methods, bodyless HEAD responses and content types with `X-Content-Type-Options: nosniff`; unsupported methods cannot disclose file contents. |
 | Generated HTML | Title, meta names/values, asset attributes and base/API configuration remain in their intended text or attribute context. |
 
@@ -46,9 +47,10 @@ resolved target of an internal symlink must satisfy the same public-file policy.
 Requests are limited to 8192 raw path bytes and asset segments to 255 bytes.
 
 SPA-owned GET and HEAD requests are supported; HEAD responses have no body.
-Invalid/private/missing assets return 404, unsupported methods 405 with an Allow
-header, oversized paths 414, and operational bundle/render failures 500. These
-errors are plain text with `nosniff` and `Cache-Control: no-store`. Missing public
+Invalid/private paths and missing ordinary assets return 404, unsupported methods
+405 with an Allow header, oversized paths 414, and operational bundle/render
+failures 500. These errors are plain text with `nosniff` and
+`Cache-Control: no-store`. Missing public
 resources use `File not Found (SPA-Serve Asset Path: /public/directory/).`, with
 percent-encoded URL segments and an optional fixed CSS/JavaScript or rejection
 hint. Private/invalid paths retain generic diagnostics. No error may expose raw
@@ -71,6 +73,23 @@ Successful public-file reads and excluded API requests bypass this negotiation.
 Exercise these guarantees in development and production, including HEAD and
 renderer-failure sentinels that prove rejection happens before HTML generation.
 
+Recognize `/@vite/client`, `/@vite/env`, `/@id/` and `/@fs/` at the root and under
+the effective mount, with exact endpoint or segment boundaries. In development,
+also recognize the configured local Vite client and entrypoint using the same
+mount resolution as generated HTML. Check requests derived from the actual HTML,
+including paths at the domain root outside a prefixed mount, relative configurations
+and browser-normalized dot segments. Never relax incoming traversal validation
+or claim a local route from an unrelated external development URL.
+
+After API exclusions, method checks and private-path validation, recognized Vite
+requests receive a fixed 500 development diagnostic before filesystem access or
+HTML generation. The message names `server.proxy`, `vite.config` and the Vite
+development URL, without reflecting paths, queries or header values. Production
+denies reserved Vite endpoints with generic 404 even if a same-named file exists.
+Keep ordinary production assets, unrelated routes and API delegation as positive
+controls; do not introduce a blanket `/src/` restriction. HEAD, `nosniff` and
+`no-store` guarantees apply to the diagnostic responses too.
+
 ## 3. Research basis
 
 These published failures motivate regression cases. They are not claims that
@@ -89,6 +108,7 @@ SPA-Serve uses the affected libraries or has every listed vulnerability.
 | [RFC 9110 Accept semantics][http-accept] | Missing Accept, wildcards, weights and media parameters have distinct meanings; a broad wildcard cannot override a specific HTML rejection. |
 | [Fetch default Accept headers][fetch] | Script requests can accept everything, and stylesheet requests can include a low-quality wildcard; HTML acceptability alone does not identify navigation. |
 | [Fetch Metadata][fetch-metadata] | Use resource destinations to reject inappropriate fallback and include the relevant request headers in Vary. |
+| [Vite proxy configuration][vite-proxy] and [backend integration][vite-backend] | Generated client/source URLs must reach Vite; a catch-all proxy must not send them to the HTML backend. |
 
 [starlette-prefix]: https://github.com/Kludex/starlette/security/advisories/GHSA-v5gw-mw7f-84px
 [apache]: https://httpd.apache.org/security/vulnerabilities_24.html#CVE-2021-42013
@@ -101,6 +121,8 @@ SPA-Serve uses the affected libraries or has every listed vulnerability.
 [http-accept]: https://www.rfc-editor.org/rfc/rfc9110.html#section-12.5.1
 [fetch]: https://fetch.spec.whatwg.org/#concept-fetch
 [fetch-metadata]: https://www.w3.org/TR/fetch-metadata/
+[vite-proxy]: https://vite.dev/config/server-options#server-proxy
+[vite-backend]: https://vite.dev/guide/backend-integration
 
 ## 4. Trusted configuration and deployment limits
 

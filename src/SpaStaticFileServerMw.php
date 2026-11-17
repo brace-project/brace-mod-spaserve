@@ -25,6 +25,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
     private const MAX_ACCEPT_BYTES = 8192;
     private const MAX_ACCEPT_RANGES = 64;
     private const FALLBACK_VARY = 'Accept, Sec-Fetch-Dest';
+    private const VITE_PROXY_ERROR = 'Vite development resource reached SPA-Serve. '
+        . 'Check server.proxy in vite.config and open the Vite development URL.';
 
     private ?PhoreDirectory $bundleDir = null;
     private ?string $bundleRoot = null;
@@ -95,7 +97,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             $this->html->development = $this->development;
             $this->html->setApplicationUrls(
                 $this->mount,
-                rtrim($this->mount, '/') . '/' . trim($this->apiMountPath, '/'),
+                phore_uri($this->mount . '/' . trim($this->apiMountPath, '/'))->formatUri(trailingSlash: false),
             );
         }
         $this->html->meta['app-env'] = $app->environmentType->value;
@@ -108,6 +110,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      * private paths return 404, unsupported methods 405 and operational errors
      * 500. Missing assets name only the encoded public URL directory, never a
      * filesystem path. HTML fallback respects Accept and the fetch destination.
+     * Misrouted Vite resources return a development-only proxy diagnostic (500)
+     * before file access; reserved Vite endpoints return 404 in production.
      * Excluded requests are passed to the handler unchanged.
      *
      * @param ServerRequestInterface $request Request from the HTTP adapter.
@@ -134,16 +138,24 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 return $handler->handle($request);
             }
         }
-        if (!$this->isMountedPath($path)) {
+        $mountedPath = $this->isMountedPath($path);
+        $viteResource = $this->isViteResourcePath($path);
+        if (!$mountedPath && !$viteResource) {
             return $this->errorResponse($request, 404, 'Requested path is outside the configured SPA URL prefix.');
         }
         if (!in_array($request->getMethod(), ['GET', 'HEAD'], true)) {
             return $this->errorResponse($request, 405, 'SPA delivery only supports GET and HEAD.', ['Allow' => 'GET, HEAD']);
         }
 
-        $relativePath = $this->relativePath($path);
+        $relativePath = $mountedPath ? $this->relativePath($path) : ltrim($path, '/');
         if (!$this->isPublicAssetPath($relativePath)) {
             return $this->errorResponse($request, 404, 'SPA asset not found.');
+        }
+        if ($viteResource) {
+            // Vite muss diese Requests selbst bedienen, auch außerhalb des Mounts.
+            return $this->development
+                ? $this->errorResponse($request, 500, self::VITE_PROXY_ERROR)
+                : $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
         // Nur reguläre öffentliche Dateien aus dem gebundenen Bundle lesen.
@@ -192,6 +204,54 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         );
     }
 
+    private function isViteResourcePath(string $path): bool
+    {
+        // Standard-URLs können global oder unter Vites konfiguriertem Base liegen.
+        $candidates = [$path];
+        if ($this->mount !== '/' && $this->isMountedPath($path)) {
+            $candidates[] = phore_uri($path)->rel($this->mount)->formatUri(leadingSlash: true, trailingSlash: str_ends_with($path, '/'));
+        }
+        foreach ($candidates as $candidate) {
+            // Client/Env exakt, ID/FS nur mit vollständiger Segmentgrenze erkennen.
+            if (preg_match('~\A/@(?:vite/(?:client|env)\z|(?:id|fs)(?:/|\z))~', $candidate) === 1) {
+                return true;
+            }
+        }
+
+        if (!$this->development || !($this->html instanceof ViteAutoHtml)) {
+            return false;
+        }
+        foreach ([$this->html->devViteClient, $this->html->devEntrypoint] as $url) {
+            if ($url !== null && $this->resolveDevelopmentPath($url) === $path) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function resolveDevelopmentPath(string $url): ?string
+    {
+        if (
+            $url === ''
+            || str_starts_with($url, '//')
+            || preg_match('#^[a-z][a-z0-9+.-]*://#i', $url)
+            || preg_match('/[\x00-\x1f\x7f]/', $url)
+        ) {
+            return null;
+        }
+        // Wie ViteAutoHtml: relative URLs am Mount auflösen, absolute unverändert.
+        if (!str_starts_with($url, '/')) {
+            $url = rtrim($this->mount, '/') . '/' . $url;
+        }
+        $path = parse_url($url, PHP_URL_PATH);
+        if (!is_string($path) || $path === '') {
+            return null;
+        }
+
+        // Nur konfigurierte URL-Pfade bereinigen; Requests bleiben strikt validiert.
+        return $this->decodeRequestPath(phore_uri($path)->formatUri(trailingSlash: false));
+    }
+
     private function tryStaticFile(string $relativePath, ServerRequestInterface $request): ?ResponseInterface
     {
         // Nicht auflösbare Links sind keine auslieferbaren Ressourcen. Fehler
@@ -208,13 +268,17 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
-        // Auch ein erlaubter interner Symlink darf keine private Datei freigeben.
+        // Auch das reale Symlink-Ziel muss innerhalb der Bundle-Root öffentlich sein.
         $resolved = realpath((string) $file);
-        $rootPrefix = rtrim($this->bundleRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         if ($resolved === false) {
             return $this->errorResponse($request, 500, 'Unable to read the SPA asset.');
         }
-        if (!str_starts_with($resolved, $rootPrefix) || !$this->isPublicAssetPath(substr($resolved, strlen($rootPrefix)))) {
+        try {
+            $resolvedRelative = phore_uri($resolved)->rel($this->bundleRoot)->getUri();
+        } catch (\InvalidArgumentException) {
+            return $this->errorResponse($request, 404, 'SPA asset not found.');
+        }
+        if ($resolvedRelative === '.' || !$this->isPublicAssetPath($resolvedRelative)) {
             return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
@@ -469,21 +533,15 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         // Genau einmal dekodieren; mehrdeutige Rest-Escapes nicht weiterreichen.
         if (
             !str_starts_with($path, '/')
-            || str_contains($path, '//')
-            || strpbrk($path, "\\?#") !== false
+            || strpbrk($path, '?#') !== false
             || preg_match('/[\x00-\x1f\x7f]|%[0-9a-f]{2}/i', $path)
             || preg_match('//u', $path) !== 1
         ) {
             return null;
         }
 
-        foreach (explode('/', $path) as $segment) {
-            if ($segment === '.' || $segment === '..') {
-                return null;
-            }
-        }
-
-        return $path;
+        // Unsaubere Request-Pfade ablehnen, nicht normalisieren.
+        return phore_uri($path)->isClean() ? $path : null;
     }
 
     private function isPublicAssetPath(string $path): bool
@@ -536,20 +594,26 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
     private function relativePath(string $path): string
     {
-        return ltrim($this->mount === '/' ? $path : substr($path, strlen($this->mount)), '/');
+        if ($path === $this->mount || $path === $this->mount . '/') {
+            return '';
+        }
+
+        return phore_uri($path)
+            ->rel($this->mount)
+            ->formatUri(leadingSlash: false, trailingSlash: str_ends_with($path, '/'));
     }
 
     private function normalizeMount(string $mount): string
     {
-        return '/' . trim($mount, '/');
+        return phore_uri('/' . $mount)->formatUri(trailingSlash: false);
     }
 
     private function resolveExcludedPath(string $path): string
     {
         $path = $this->normalizeMount($path);
-        if ($this->mount === '/' || $path === $this->mount || str_starts_with($path, $this->mount . '/')) {
+        if ($this->isMountedPath($path)) {
             return $path;
         }
-        return $this->mount . $path;
+        return phore_uri($this->mount . $path)->formatUri(trailingSlash: false);
     }
 }
