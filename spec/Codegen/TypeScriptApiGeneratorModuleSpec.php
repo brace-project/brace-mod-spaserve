@@ -98,6 +98,28 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
         }
     }
 
+    public function it_disables_automatic_generation_by_default(): void
+    {
+        $parameter = (new \ReflectionMethod(
+            \Brace\SpaServe\Codegen\TypeScriptApiGeneratorModule::class,
+            '__construct',
+        ))->getParameters()[4];
+        if ($parameter->getDefaultValue() !== false) {
+            throw new RuntimeException('Automatic generation must be disabled by default.');
+        }
+
+        $this->beConstructedWith($this->targetFile);
+        $app = $this->app(EnvironmentType::DEVELOPMENT);
+        $app->router->on('GET@/health', static fn (): string => 'ok', [], 'Health');
+        $this->register($app);
+        if (is_file($this->targetFile)) throw new RuntimeException('Bootstrap generated the stub by default.');
+
+        $output = $app->command->runCommand('spa-api-build', [], true);
+        if ($output !== 'TypeScript API stub updated.' || !is_file($this->targetFile)) {
+            throw new RuntimeException('Explicit generation must remain available with the default settings.');
+        }
+    }
+
     public function it_does_not_auto_generate_during_cli_bootstrap(): void
     {
         $this->beConstructedWith(
