@@ -212,11 +212,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             $candidates[] = '/' . $this->relativePath($path);
         }
         foreach ($candidates as $candidate) {
-            if (
-                in_array($candidate, ['/@vite/client', '/@vite/env', '/@id', '/@fs'], true)
-                || str_starts_with($candidate, '/@id/')
-                || str_starts_with($candidate, '/@fs/')
-            ) {
+            // Client/Env exakt, ID/FS nur mit vollständiger Segmentgrenze erkennen.
+            if (preg_match('~\A/@(?:vite/(?:client|env)\z|(?:id|fs)(?:/|\z))~', $candidate) === 1) {
                 return true;
             }
         }
@@ -251,24 +248,14 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             return null;
         }
 
-        // Browser kürzen Dot-Segmente in konfigurierten URLs vor dem Request.
-        // Eingehende Request-Pfade durchlaufen weiterhin die strikte Validierung.
-        $segments = explode('/', substr($path, 1));
-        $resolved = [];
-        foreach ($segments as $index => $segment) {
-            $dotSegment = rawurldecode($segment);
-            if ($dotSegment === '.' || $dotSegment === '..') {
-                if ($dotSegment === '..') {
-                    array_pop($resolved);
-                }
-                if ($index === array_key_last($segments)) {
-                    $resolved[] = '';
-                }
-                continue;
-            }
-            $resolved[] = $segment;
+        // Nur konfigurierte URL-Pfade bereinigen; Requests bleiben strikt validiert.
+        try {
+            $path = phore_uri($path)->clean(urlPath: true)->getUri();
+        } catch (\InvalidArgumentException) {
+            return null;
         }
-        return $this->decodeRequestPath('/' . implode('/', $resolved));
+
+        return $this->decodeRequestPath($path);
     }
 
     private function tryStaticFile(string $relativePath, ServerRequestInterface $request): ?ResponseInterface
