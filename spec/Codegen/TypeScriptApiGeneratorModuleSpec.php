@@ -62,7 +62,7 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
             'spa-api-build',
             '/api',
         );
-        $app = $this->app(appBasePath: '/wurst');
+        $app = $this->app(url_prefix: '/wurst');
         $app->router->on('GET@/api/users/:userId', static fn (int $userId): string => (string)$userId, [], 'User.Get');
         $this->register($app);
         $this->load()->shouldReturn(true);
@@ -135,9 +135,9 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
         if (is_file($this->targetFile)) throw new RuntimeException('CLI bootstrap generated the stub before spa-api-build was executed.');
     }
 
-    private function app(EnvironmentType $environment = EnvironmentType::PRODUCTION, string $appBasePath = ''): BraceApp
+    private function app(EnvironmentType $environment = EnvironmentType::PRODUCTION, string $url_prefix = ''): BraceApp
     {
-        $app = new BraceApp($environment, $appBasePath);
+        $app = new BraceApp($environment, url_prefix: $url_prefix);
         $app->addModule(new RouterModule());
         return $app;
     }
