@@ -127,22 +127,23 @@ class SpaStaticFileServerMw extends BraceAbstractMiddleware
             }
         }
 
+        $relativeFile = ltrim($file, "/");
         $data = "";
-        if (str_contains($file, ".")) {
-            if (phore_file($file)->getFilename() === "@") {
-                $dir = phore_dir($this->rootDir->withSubPath(phore_file($file)->getDirname()));
-                foreach ($dir->getListSorted("*." . phore_file($file)->getExtension(), true) as $inludeFile) {
+        if (str_contains($relativeFile, ".")) {
+            if (phore_file($relativeFile)->getFilename() === "@") {
+                $dir = phore_dir($this->rootDir->withSubPath(phore_file($relativeFile)->getDirname()));
+                foreach ($dir->getListSorted("*." . phore_file($relativeFile)->getExtension(), true) as $inludeFile) {
                     $data .= $inludeFile->assertFile()->get_contents();
                     $data .= "\n/* Inluded from file: $inludeFile */\n\n";
                 }
                 return $this->app->responseFactory->createResponseWithBody(
                     $data,
-                    200, ["Content-Type" => $this->getContentTypeFor($file)]
+                    200, ["Content-Type" => $this->getContentTypeFor($relativeFile)]
                 );
             } else {
                 return $this->app->responseFactory->createResponseWithBody(
-                    $this->rootDir->withRelativePath($file)->assertFile()->get_contents(),
-                    200, ["Content-Type" => $this->getContentTypeFor($file)]
+                    $this->rootDir->withRelativePath($relativeFile)->assertFile()->get_contents(),
+                    200, ["Content-Type" => $this->getContentTypeFor($relativeFile)]
                 );
             }
         } else {
