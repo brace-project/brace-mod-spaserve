@@ -58,7 +58,7 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         $routes = [];
         $classes = [];
         $routerPrefix = $this->app->router->getPrefix();
-        $apiMountPath = phore_uri('/' . $this->apiMountPath)->clean()->getUri();
+        $apiMountPath = phore_uri('/' . $this->apiMountPath)->formatUri(trailingSlash: false);
         foreach ($this->app->router->getNamedRoutes() as $route) {
             [$methods, $path] = explode('@', $route['route'], 2);
             $path = $this->stripPathPrefix($path, $routerPrefix);
@@ -104,12 +104,10 @@ final class TypeScriptApiGeneratorModule implements BraceModule
             return $path;
         }
 
-        // Segmentgrenzen zuerst prüfen, dann die relative URI berechnen.
-        $relative = phore_uri($path)->rel($prefix)->getUri();
-        if ($relative === '.') {
-            return '/';
-        }
-        return '/' . $relative . (str_ends_with($path, '/') ? '/' : '');
+        // Segmentgrenzen zuerst prüfen, dann relative URL-Form erzeugen.
+        return phore_uri($path)
+            ->rel($prefix)
+            ->formatUri(leadingSlash: true, trailingSlash: str_ends_with($path, '/'));
     }
 
     private function parseCallback(mixed $callback): FunctionSchema

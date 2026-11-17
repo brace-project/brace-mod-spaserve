@@ -46,9 +46,12 @@ Run Brace on port 8080 and Vite on port 4000; open the **Vite** URL in the brows
 The middleware rejects unclean, once-decoded incoming URL paths with
 `phore_uri($path)->isClean()`; it never repairs user-supplied traversal.
 This API comes from [phore/filesystem PR #5](https://github.com/phore/phore-filesystem/pull/5).
-For trusted configuration paths it continues using `clean()`. Relative
-mount paths and resolved filesystem root boundaries use `PhoreUri::rel()`;
-the public-file policy and HTTP encoding checks remain separate.
+Trusted configuration URLs use `formatUri(trailingSlash: false)` to clean and
+format paths in one call. `PhoreUri::rel()->formatUri(leadingSlash: true)`
+produces API route paths without manual dot/root or slash concatenation.
+A trailing slash is explicitly preserved where route semantics require it.
+Resolved filesystem boundaries still use `PhoreUri::rel()`; public-asset
+policy and HTTP encoding checks remain separate.
 
 ## Development proxy diagnostics
 

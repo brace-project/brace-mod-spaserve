@@ -97,7 +97,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             $this->html->development = $this->development;
             $this->html->setApplicationUrls(
                 $this->mount,
-                phore_uri($this->mount . '/' . trim($this->apiMountPath, '/'))->clean()->getUri(),
+                phore_uri($this->mount . '/' . trim($this->apiMountPath, '/'))->formatUri(trailingSlash: false),
             );
         }
         $this->html->meta['app-env'] = $app->environmentType->value;
@@ -209,7 +209,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         // Standard-URLs können global oder unter Vites konfiguriertem Base liegen.
         $candidates = [$path];
         if ($this->mount !== '/' && $this->isMountedPath($path)) {
-            $candidates[] = '/' . $this->relativePath($path);
+            $candidates[] = phore_uri($path)->rel($this->mount)->formatUri(leadingSlash: true, trailingSlash: str_ends_with($path, '/'));
         }
         foreach ($candidates as $candidate) {
             // Client/Env exakt, ID/FS nur mit vollständiger Segmentgrenze erkennen.
@@ -249,7 +249,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         }
 
         // Nur konfigurierte URL-Pfade bereinigen; Requests bleiben strikt validiert.
-        return $this->decodeRequestPath(phore_uri($path)->clean()->getUri());
+        return $this->decodeRequestPath(phore_uri($path)->formatUri(trailingSlash: false));
     }
 
     private function tryStaticFile(string $relativePath, ServerRequestInterface $request): ?ResponseInterface
@@ -594,16 +594,18 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
     private function relativePath(string $path): string
     {
-        $relative = phore_uri($path)->rel($this->mount)->getUri();
-        if ($relative === '.') {
+        if ($path === $this->mount || $path === $this->mount . '/') {
             return '';
         }
-        return $relative . (str_ends_with($path, '/') ? '/' : '');
+
+        return phore_uri($path)
+            ->rel($this->mount)
+            ->formatUri(leadingSlash: false, trailingSlash: str_ends_with($path, '/'));
     }
 
     private function normalizeMount(string $mount): string
     {
-        return phore_uri('/' . $mount)->clean()->getUri();
+        return phore_uri('/' . $mount)->formatUri(trailingSlash: false);
     }
 
     private function resolveExcludedPath(string $path): string
@@ -612,6 +614,6 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         if ($this->isMountedPath($path)) {
             return $path;
         }
-        return phore_uri($this->mount . $path)->clean()->getUri();
+        return phore_uri($this->mount . $path)->formatUri(trailingSlash: false);
     }
 }
