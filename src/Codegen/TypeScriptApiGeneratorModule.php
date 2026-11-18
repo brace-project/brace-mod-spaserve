@@ -67,11 +67,19 @@ final class TypeScriptApiGeneratorModule implements BraceModule
             $function = $this->parseCallback($route['call']);
             preg_match_all('/\{([A-Za-z_][A-Za-z0-9_]*)\}/', $path, $matches);
             $pathNames = array_flip($matches[1] ?? []);
+            $httpMethods = array_values(array_unique(array_map('strtoupper', explode('|', $methods))));
+            $acceptsBody = array_diff($httpMethods, ['POST', 'PUT', 'PATCH']) === [];
             $pathParams = [];
             $queryParams = [];
+            $body = null;
             foreach ($function->parameters as $parameter) {
-                if (isset($pathNames[$parameter->name])) $pathParams[$parameter->name] = $parameter->type;
-                else $queryParams[$parameter->name] = $parameter->type;
+                if (isset($pathNames[$parameter->name])) {
+                    $pathParams[$parameter->name] = $parameter->type;
+                } elseif ($acceptsBody && $parameter->name === 'body') {
+                    $body = $parameter->type;
+                } else {
+                    $queryParams[$parameter->name] = $parameter->type;
+                }
                 $this->collectClasses($parameter->type, $classes, $parameter->nativeType);
             }
             foreach (array_keys($pathNames) as $pathName) {
@@ -83,9 +91,9 @@ final class TypeScriptApiGeneratorModule implements BraceModule
             $routes[] = [
                 'name' => $route['name'],
                 'path' => $path,
-                'methods' => array_values(array_unique(array_map('strtoupper', explode('|', $methods)))),
+                'methods' => $httpMethods,
                 'response' => $function->return->type,
-                'body' => null,
+                'body' => $body,
                 'pathParams' => $pathParams,
                 'queryParams' => $queryParams,
             ];
