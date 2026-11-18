@@ -25,6 +25,8 @@ $app->addMiddleware(new SpaStaticFileServerMw(
         startHtml: '<demo-app><main id="content"></main></demo-app>',
     ),
     excludePaths: ['/api'],
+    // Optional: null (default) lets all navigation routes receive SPA HTML.
+    spaRoutes: ['/', '/app/**', '/dashboard/**', '/login'],
 ));
 ```
 
@@ -52,6 +54,40 @@ produces API route paths without manual dot/root or slash concatenation.
 A trailing slash is explicitly preserved where route semantics require it.
 Resolved filesystem boundaries still use `PhoreUri::rel()`; public-asset
 policy and HTTP encoding checks remain separate.
+
+## SPA HTML routes
+
+By default, `spaRoutes: null` lets every valid navigation path inside the SPA
+mount receive the HTML shell (current behavior). Optionally restrict this
+to route patterns relative to the effective `mount`:
+
+```php
+new SpaStaticFileServerMw(
+    bundleDir: __DIR__ . '/dist',
+    html: new ViteAutoHtml(),
+    mount: '/portal',
+    spaRoutes: ['/', '/app/**', '/users/*/edit', '/login'],
+);
+```
+
+Patterns are segment-based: `/` matches only the SPA root; `/**` matches
+every route; `/app` matches exactly `/app`; `/app/*` matches one nonempty
+segment below `/app`; and `/app/**` matches `/app` plus any number of nested
+segments. `/users/*/edit` matches `/users/123/edit`. A trailing slash on
+a route or pattern does not affect matching. With `mount: '/portal'`, the
+pattern `/app/**` applies to `/portal/app` and `/portal/app/profile`.
+`spaRoutes: []` disables all HTML fallback, whereas `null` (the default)
+allows all routes. Unsupported partial-segment wildcards, malformed paths
+and traversal segments in configured patterns raise `InvalidArgumentException`.
+
+Only **HTML fallback** is controlled: existing public static files are still
+served; missing assets keep their usual 404, recognized Vite requests keep their
+development diagnostics, and malformed/private requests retain the existing
+rejection policy. If a valid navigation path does not match any `spaRoutes`,
+SPA-Serve delegates the original request to the next middleware rather than
+serving HTML. `excludePaths` continues to bypass SPA-Serve earlier in the
+request flow. These patterns select HTML-routing responsibility, **not access
+authorization**.
 
 ## Development proxy diagnostics
 

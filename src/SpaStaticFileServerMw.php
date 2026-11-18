@@ -46,6 +46,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      * @param HtmlGenerator $html HTML shell for client side routes.
      * @param string $mount SPA URL prefix.
      * @param list<string> $excludePaths Backend paths that must reach the next handler.
+     * @param list<string>|null $spaRoutes SPA HTML route patterns relative to mount; null permits all.
      * @throws \RuntimeException If the production bundle directory is missing.
      * @see ViteAutoHtml
      * @example new SpaStaticFileServerMw(__DIR__ . '/dist', new ViteAutoHtml(development: true), excludePaths: ['/api']);
@@ -56,7 +57,26 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         ?string $mount = null,
         public array $excludePaths = ['/api'],
         public string $apiMountPath = '/api',
+        public ?array $spaRoutes = null,
     ) {
+        if ($this->spaRoutes !== null) {
+            foreach ($this->spaRoutes as $pattern) {
+                if (
+                    !is_string($pattern)
+                    || !str_starts_with($pattern, '/')
+                    || !phore_uri($pattern)->isClean()
+                    || strpbrk($pattern, '?#') !== false
+                ) {
+                    throw new \InvalidArgumentException('SPA route patterns must be clean absolute URL paths.');
+                }
+                foreach (explode('/', trim($pattern, '/')) as $segment) {
+                    if (str_contains($segment, '*') && $segment !== '*' && $segment !== '**') {
+                        throw new \InvalidArgumentException('SPA route wildcards must occupy a complete segment.');
+                    }
+                }
+            }
+        }
+
         $this->configuredMount = $mount;
         $this->mount = $this->normalizeMount($mount ?? '/');
         $this->configuredBundleDir = $bundleDir;
@@ -112,7 +132,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      * filesystem path. HTML fallback respects Accept and the fetch destination.
      * Misrouted Vite resources return a development-only proxy diagnostic (500)
      * before file access; reserved Vite endpoints return 404 in production.
-     * Excluded requests are passed to the handler unchanged.
+     * Excluded requests are passed to the handler unchanged. Unmatched spaRoutes
+     * delegate to the next handler after asset and request-policy checks.
      *
      * @param ServerRequestInterface $request Request from the HTTP adapter.
      * @param RequestHandlerInterface $handler Handler for excluded API routes.
@@ -184,6 +205,10 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         if ($relativePath === 'assets' || str_starts_with($relativePath, 'assets/') || pathinfo($relativePath, PATHINFO_EXTENSION) !== '') {
             return $this->missingAssetResponse($request, $relativePath);
         }
+        if (!$this->matchesSpaRoute($relativePath)) {
+            return $handler->handle($request);
+        }
+
         $fallbackRejection = $this->fallbackRejection($request);
         if ($fallbackRejection !== null) {
             return $this->missingAssetResponse($request, $relativePath, $fallbackRejection);
@@ -202,6 +227,42 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             200,
             ['Content-Type' => 'text/html; charset=utf-8', 'Vary' => self::FALLBACK_VARY],
         );
+    }
+
+    /**
+     * Match SPA HTML routes relative to the mount; '*' matches one segment,
+     * '**' matches zero or more segments. Patterns are not authorization rules.
+     */
+    private function matchesSpaRoute(string $relativePath): bool
+    {
+        if ($this->spaRoutes === null) {
+            return true;
+        }
+
+        $path = '/' . trim($relativePath, '/');
+        foreach ($this->spaRoutes as $pattern) {
+            $pattern = rtrim($pattern, '/') ?: '/';
+            if ($pattern === '/') {
+                if ($path === '/') {
+                    return true;
+                }
+                continue;
+            }
+
+            $regex = '';
+            foreach (explode('/', ltrim($pattern, '/')) as $segment) {
+                $regex .= match ($segment) {
+                    '*' => '/[^/]+',
+                    '**' => '(?:/[^/]+)*',
+                    default => '/' . preg_quote($segment, '~'),
+                };
+            }
+            if (preg_match('~\\A' . $regex . '\\z~D', $path) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isViteResourcePath(string $path): bool
