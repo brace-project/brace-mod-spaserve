@@ -97,6 +97,23 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
         }
     }
 
+    public function it_generates_a_typed_post_body_and_response(): void
+    {
+        $app = $this->app();
+        $app->router->on('POST@/api/calculate', [StubPostController::class, 'calculate'], [], 'Demo.CalculatePost');
+        $this->register($app);
+        $this->load()->shouldReturn(true);
+        $generated = file_get_contents($this->targetFile);
+
+        if ($generated === false
+            || !str_contains($generated, 'export interface StubCalculateInput')
+            || !str_contains($generated, 'export interface StubCalculateResponse')
+            || !str_contains($generated, '"CalculatePost": ApiRoute<Record<string, never>, Record<string, never>, StubCalculateInput, StubCalculateResponse, "POST">;')
+            || !str_contains($generated, '"Demo.CalculatePost": ["POST", "/api/calculate"]')) {
+            throw new RuntimeException('Typed POST request body or response was not generated correctly.');
+        }
+    }
+
     public function it_only_generates_when_the_build_command_is_executed(): void
     {
         $this->beConstructedWith($this->targetFile);
@@ -138,4 +155,25 @@ final class StubController
 final class StubResponse
 {
     public string $message;
+}
+
+final class StubPostController
+{
+    /** @return StubCalculateResponse Computed result for the submitted input. */
+    public function calculate(StubCalculateInput $body): StubCalculateResponse
+    {
+        $response = new StubCalculateResponse();
+        $response->total = $body->count;
+        return $response;
+    }
+}
+
+final class StubCalculateInput
+{
+    public int $count;
+}
+
+final class StubCalculateResponse
+{
+    public int $total;
 }
