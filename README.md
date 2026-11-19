@@ -37,12 +37,29 @@ via URLs such as `/assets/images/logo.svg` and `/assets/dist/app.js` (relative
 to the SPA mount); `src/` and other frontend paths remain private. The build
 directory must exist in production, but not during development.
 
+The generated HTML sets a document base from the effective SPA mount. Without
+an application prefix the HTML contains `<base href="/">`; for `mount: '/demo'`
+it contains `<base href="/demo/">`. `HtmlGenerator` also accepts `baseHref`
+(default `/`), while `ViteAutoHtml` derives it automatically from `url_prefix`.
+The base element is emitted immediately after the character-set declaration,
+before stylesheets and scripts, and its attribute is HTML-escaped.
+
 The generated HTML exposes two independent frontend settings:
 
 ```html
+<base href="/demo/">
 <meta name="app-base-path" content="/demo/">
 <meta name="api-base-url" content="https://api.example.test/v1">
 ```
+
+The HTML `<base>` controls how browsers resolve relative asset URLs, links,
+forms and fragment references. For example, `assets/dist/app.js` resolves to
+`/demo/assets/dist/app.js` even on `/demo/users/123`, while an absolute
+`/api/users` URL remains unchanged. Relative links such as `settings` resolve
+to `/demo/settings`, and `#section` targets the base document rather than
+necessarily the current nested route. Client-side routers must still handle
+the SPA mount, History API navigation and their own route patterns. Use
+absolute or router-managed links when the destination must not be base-relative.
 
 `app-base-path` controls frontend routing, navigation and links. `api-base-url` controls API requests and may point to a different path or server. When `BraceApp::$apiBaseUrl` is omitted, it defaults to the application base path. An explicit API client configuration still has the highest priority.
 
