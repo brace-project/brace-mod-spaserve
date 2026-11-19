@@ -39,8 +39,10 @@ directory must exist in production, but not during development.
 
 The generated HTML sets a document base from the effective SPA mount. Without
 an application prefix the HTML contains `<base href="/">`; for `mount: '/demo'`
-it contains `<base href="/demo/">`. `HtmlGenerator` also accepts `baseHref`
-(default `/`), while `ViteAutoHtml` derives it automatically from `url_prefix`.
+it contains `<base href="/demo/">`. The middleware derives the base from its
+effective `mount` for every `HtmlGenerator`, including plain HTML generators.
+`HtmlGenerator` defaults `baseHref` to `/` when used independently, but a
+middleware-bound generator always receives the normalized mount automatically.
 The base element is emitted immediately after the character-set declaration,
 before stylesheets and scripts, and its attribute is HTML-escaped.
 
