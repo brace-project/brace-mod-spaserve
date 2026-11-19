@@ -267,9 +267,9 @@ final class SpaStaticFileServerSecurityTest extends TestCase
     {
         $targets = ['.env', '.private/token.txt', 'private/config.php'];
         foreach ($targets as $index => $target) {
-            $this->writeBundleFile($target, self::SECRET);
+            $this->writeBundleFile('assets/' . $target, self::SECRET);
             $alias = 'assets/published-' . $index . '.js';
-            self::assertTrue(symlink($this->root . '/dist/' . $target, $this->root . '/dist/' . $alias));
+            self::assertTrue(symlink($this->root . '/dist/assets/' . $target, $this->root . '/dist/' . $alias));
             foreach (['', '/demo'] as $prefix) {
                 $this->assertFailure($this->request($prefix, $alias));
             }
