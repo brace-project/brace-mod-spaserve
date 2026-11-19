@@ -11,6 +11,7 @@ class HtmlGenerator
      * @param list<string> $css
      * @param list<string> $javascript
      * @param string|null $startHtml Trusted application HTML inserted at the start of <body>.
+     * @param string $baseHref Document base URL for relative links and assets.
      */
     public function __construct(
         public string $title = '',
@@ -18,6 +19,7 @@ class HtmlGenerator
         public array $css = [],
         public array $javascript = [],
         public ?string $startHtml = null,
+        public string $baseHref = '/',
     ) {
     }
 
@@ -25,6 +27,7 @@ class HtmlGenerator
     {
         $head = [
             '<meta charset="utf-8">',
+            '<base href="' . $this->escape($this->baseHref) . '">',
             '<meta name="viewport" content="width=device-width, initial-scale=1">',
         ];
 
