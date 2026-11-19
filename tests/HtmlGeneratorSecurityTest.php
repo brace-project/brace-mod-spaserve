@@ -301,8 +301,17 @@ final class HtmlGeneratorSecurityTest extends TestCase
         self::assertSame($links, $document->getElementsByTagName('link')->length);
         self::assertSame($metas, $document->getElementsByTagName('meta')->length);
 
+        // Genau eine vertrauenswürdige Base ist zulässig; Payloads dürfen weder
+        // weitere Base-Elemente noch Attribute einschleusen.
+        $bases = $document->getElementsByTagName('base');
+        self::assertSame(1, $bases->length);
+        $base = $bases->item(0);
+        self::assertInstanceOf(DOMElement::class, $base);
+        self::assertSame('/', $base->getAttribute('href'));
+        self::assertSame(1, $base->attributes->length);
+
         // Die Test-Payload darf keine ausführbaren Zusatz-Elemente erzeugen.
-        foreach (['img', 'svg', 'iframe', 'base', 'object', 'embed', 'style'] as $tag) {
+        foreach (['img', 'svg', 'iframe', 'object', 'embed', 'style'] as $tag) {
             self::assertSame(0, $document->getElementsByTagName($tag)->length, 'Unexpected element: ' . $tag);
         }
         foreach ($document->getElementsByTagName('script') as $script) {
