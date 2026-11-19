@@ -239,10 +239,10 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         self::assertTrue(symlink($this->root . '/secret.txt', $this->root . '/dist/assets/file.txt'));
         self::assertTrue(symlink($this->root . '/dist-private', $this->root . '/dist/assets/sibling'));
         self::assertTrue(symlink($this->root . '/dist/assets/file.txt', $this->root . '/dist/assets/chain.txt'));
-        self::assertTrue(symlink($this->root . '/secret.txt', $this->root . '/dist/private'));
+        self::assertTrue(symlink($this->root . '/secret.txt', $this->root . '/dist/assets/private'));
 
         foreach (['', '/demo'] as $prefix) {
-            foreach (['assets/file.txt', 'assets/sibling/secret.txt', 'assets/chain.txt', 'private'] as $path) {
+            foreach (['assets/file.txt', 'assets/sibling/secret.txt', 'assets/chain.txt', 'assets/private'] as $path) {
                 $response = $this->request($prefix, $path);
                 self::assertSame(404, $response->getStatusCode(), $prefix . '/' . $path);
                 self::assertStringNotContainsString(self::SECRET, (string) $response->getBody());
@@ -351,9 +351,9 @@ final class SpaStaticFileServerSecurityTest extends TestCase
 
     public function test_existing_directories_are_never_listed_or_returned_as_navigation(): void
     {
-        $this->writeBundleFile('documents/secret.txt', self::SECRET);
+        $this->writeBundleFile('assets/documents/secret.txt', self::SECRET);
         foreach (['', '/demo'] as $prefix) {
-            foreach (['documents', 'documents/', 'assets', 'assets/'] as $path) {
+            foreach (['assets/documents', 'assets/documents/', 'assets', 'assets/'] as $path) {
                 $this->assertFailure($this->request($prefix, $path));
             }
         }
