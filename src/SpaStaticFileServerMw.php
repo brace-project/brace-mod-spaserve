@@ -150,6 +150,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 phore_uri($this->mount . '/' . trim($this->apiMountPath, '/'))->formatUri(trailingSlash: false),
             );
         }
+        // Der effektive SPA-Mount bestimmt die URL-Basis jedes HTML-Generators.
+        $this->html->baseHref = rtrim($this->mount, '/') . '/';
         $this->html->meta['app-env'] = $app->environmentType->value;
     }
 
