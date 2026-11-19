@@ -28,10 +28,13 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
     private const VITE_PROXY_ERROR = 'Vite development resource reached SPA-Serve. '
         . 'Check server.proxy in vite.config and open the Vite development URL.';
 
-    private ?PhoreDirectory $bundleDir = null;
-    private ?string $bundleRoot = null;
+    private ?PhoreDirectory $assetDirectory = null;
+    private ?PhoreDirectory $bundleDirectory = null;
+    private ?string $assetRoot = null;
     private bool $development = false;
-    private PhoreDirectory|string $configuredBundleDir;
+    private PhoreDirectory|string $configuredRootDir;
+    private string $configuredAssetDir;
+    private string $configuredBundleDir;
     private ?bool $configuredDevelopment;
     private ?string $configuredMount;
     public string $mount;
@@ -42,23 +45,34 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      * Development only serves the HTML shell; Vite serves source, assets and HMR.
      * Production reads files from an existing Vite output directory.
      *
-     * @param PhoreDirectory|string $bundleDir Vite build output directory.
+     * @param PhoreDirectory|string $rootDir Frontend root directory.
+     * @param string $assetDir Public files folder relative to rootDir.
+     * @param string $bundleDir Build folder relative to assetDir.
      * @param HtmlGenerator $html HTML shell for client side routes.
      * @param string $mount SPA URL prefix.
      * @param list<string> $excludePaths Backend paths that must reach the next handler.
      * @param list<string>|null $spaRoutes SPA HTML route patterns relative to mount; null permits all.
      * @throws \RuntimeException If the production bundle directory is missing.
      * @see ViteAutoHtml
-     * @example new SpaStaticFileServerMw(__DIR__ . '/dist', new ViteAutoHtml(development: true), excludePaths: ['/api']);
+     * @example new SpaStaticFileServerMw(__DIR__ . '/app.fe', new ViteAutoHtml(css: ['assets/dist/app.css']));
      */
     public function __construct(
-        PhoreDirectory|string $bundleDir,
+        PhoreDirectory|string $rootDir,
         public HtmlGenerator $html,
+        string $assetDir = 'assets',
+        string $bundleDir = 'dist',
         ?string $mount = null,
         public array $excludePaths = ['/api'],
         public string $apiMountPath = '/api',
         public ?array $spaRoutes = null,
     ) {
+        foreach (['assetDir' => $assetDir, 'bundleDir' => $bundleDir] as $name => $directory) {
+            foreach (explode('/', $directory) as $segment) {
+                if (preg_match('/\A[a-zA-Z0-9][a-zA-Z0-9_.-]*\z/D', $segment) !== 1 || str_ends_with($segment, '.')) {
+                    throw new \InvalidArgumentException("$name must be a clean relative directory path.");
+                }
+            }
+        }
         if ($this->spaRoutes !== null) {
             foreach ($this->spaRoutes as $pattern) {
                 if (
@@ -79,6 +93,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
         $this->configuredMount = $mount;
         $this->mount = $this->normalizeMount($mount ?? '/');
+        $this->configuredRootDir = $rootDir;
+        $this->configuredAssetDir = $assetDir;
         $this->configuredBundleDir = $bundleDir;
         $this->configuredDevelopment = $html instanceof ViteAutoHtml ? $html->development : false;
     }
@@ -101,17 +117,30 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         $this->mount = $this->normalizeMount($this->configuredMount ?? $app->url_prefix);
         $this->development = $this->configuredDevelopment
             ?? ($app->environmentType === EnvironmentType::DEVELOPMENT);
-        // Die Root-Policy wird an alle späteren Dateioperationen vererbt.
-        $this->bundleDir = null;
-        $this->bundleRoot = null;
+        // Public files must stay inside the frontend root's asset directory.
+        $this->assetDirectory = null;
+        $this->bundleDirectory = null;
+        $this->assetRoot = null;
         if (!$this->development) {
-            $directory = phore_dir($this->configuredBundleDir)->assertDirectory();
-            $root = realpath((string) $directory);
-            if ($root === false) {
-                throw new FilesystemException("Cannot resolve SPA bundle directory '$directory'.");
+            $rootDir = phore_dir($this->configuredRootDir)->assertDirectory();
+            $root = realpath((string) $rootDir);
+            $assetDir = phore_dir((string) $rootDir . '/' . $this->configuredAssetDir)->assertDirectory();
+            $assetRoot = realpath((string) $assetDir);
+            if ($root === false || $assetRoot === false
+                || !str_starts_with($assetRoot, rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR)
+            ) {
+                throw new FilesystemException("Cannot resolve SPA asset directory '$assetDir' within '$rootDir'.");
             }
-            $this->bundleRoot = $root;
-            $this->bundleDir = phore_dir($directory, ['rootDir' => $root]);
+            $bundleDir = phore_dir($assetRoot . '/' . $this->configuredBundleDir)->assertDirectory();
+            $bundleRoot = realpath((string) $bundleDir);
+            if ($bundleRoot === false
+                || !str_starts_with($bundleRoot, rtrim($assetRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR)
+            ) {
+                throw new FilesystemException("Cannot resolve SPA bundle directory '$bundleDir' within '$assetDir'.");
+            }
+            $this->assetRoot = $assetRoot;
+            $this->assetDirectory = phore_dir($assetDir, ['rootDir' => $assetRoot]);
+            $this->bundleDirectory = phore_dir($bundleDir, ['rootDir' => $assetRoot]);
         }
         if ($this->html instanceof ViteAutoHtml) {
             $this->html->development = $this->development;
@@ -182,14 +211,16 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         // Nur reguläre öffentliche Dateien aus dem gebundenen Bundle lesen.
         if (!$this->development) {
             try {
-                $this->bundleDir->assertDirectory();
+                $this->assetDirectory->assertDirectory();
+                $this->bundleDirectory->assertDirectory();
             } catch (FilesystemException) {
                 return $this->errorResponse($request, 500, 'Unable to read the SPA bundle.');
             }
 
             try {
-                if ($relativePath !== '') {
-                    $assetResponse = $this->tryStaticFile($relativePath, $request);
+                $assetPrefix = $this->configuredAssetDir . '/';
+                if (str_starts_with($relativePath, $assetPrefix)) {
+                    $assetResponse = $this->tryStaticFile(substr($relativePath, strlen($assetPrefix)), $request);
                     if ($assetResponse !== null) {
                         return $assetResponse;
                     }
@@ -202,7 +233,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         }
 
         // Fehlende Assets dürfen auch bei HTML-Akzeptanz keine SPA-Seite erhalten.
-        if ($relativePath === 'assets' || str_starts_with($relativePath, 'assets/') || pathinfo($relativePath, PATHINFO_EXTENSION) !== '') {
+        if ($relativePath === $this->configuredAssetDir || str_starts_with($relativePath, $this->configuredAssetDir . '/') || pathinfo($relativePath, PATHINFO_EXTENSION) !== '') {
             return $this->missingAssetResponse($request, $relativePath);
         }
         if (!$this->matchesSpaRoute($relativePath)) {
@@ -313,17 +344,17 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         return $this->decodeRequestPath(phore_uri($path)->formatUri(trailingSlash: false));
     }
 
-    private function tryStaticFile(string $relativePath, ServerRequestInterface $request): ?ResponseInterface
+    private function tryStaticFile(string $assetPath, ServerRequestInterface $request): ?ResponseInterface
     {
         // Nicht auflösbare Links sind keine auslieferbaren Ressourcen. Fehler
         // beim anschließenden Lesen bleiben davon getrennte Serverfehler.
         try {
-            $file = $this->bundleDir->withSubPath($relativePath);
+            $file = $this->assetDirectory->withSubPath($assetPath);
             if (!$file->exists()) {
                 return null;
             }
             if (!$file->isFile()) {
-                return $this->missingAssetResponse($request, $relativePath);
+                return $this->missingAssetResponse($request, $this->configuredAssetDir . '/' . $assetPath);
             }
         } catch (FilesystemException) {
             return $this->errorResponse($request, 404, 'SPA asset not found.');
@@ -335,7 +366,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             return $this->errorResponse($request, 500, 'Unable to read the SPA asset.');
         }
         try {
-            $resolvedRelative = phore_uri($resolved)->rel($this->bundleRoot)->getUri();
+            $resolvedRelative = phore_uri($resolved)->rel($this->assetRoot)->getUri();
         } catch (\InvalidArgumentException) {
             return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
@@ -571,8 +602,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         }
         $separator = strrpos($relativePath, '/');
         $directory = $separator === false ? '' : substr($relativePath, 0, $separator + 1);
-        if ($relativePath === 'assets') {
-            $directory = 'assets/';
+        if ($relativePath === $this->configuredAssetDir) {
+            $directory = $this->configuredAssetDir . '/';
         }
         $directory = rtrim($this->mount, '/') . '/' . $directory;
         // Ausschließlich das öffentliche URL-Verzeichnis zeigen, sicher kodiert.
