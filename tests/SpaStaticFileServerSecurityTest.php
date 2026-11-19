@@ -31,7 +31,7 @@ final class SpaStaticFileServerSecurityTest extends TestCase
     protected function setUp(): void
     {
         $this->root = sys_get_temp_dir() . '/spaserve-security-' . bin2hex(random_bytes(8));
-        self::assertTrue(mkdir($this->root . '/dist/assets', 0700, true));
+        self::assertTrue(mkdir($this->root . '/dist/assets/dist', 0700, true));
         self::assertTrue(mkdir($this->root . '/dist-private', 0700));
         file_put_contents($this->root . '/secret.txt', self::SECRET);
         file_put_contents($this->root . '/dist-private/secret.txt', self::SECRET);
@@ -220,13 +220,14 @@ final class SpaStaticFileServerSecurityTest extends TestCase
     #[DataProvider('privateFiles')]
     public function test_never_serves_existing_private_files_inside_the_bundle(string $path): void
     {
-        $this->writeBundleFile($path, self::SECRET);
+        $publicPath = str_starts_with($path, 'assets/') ? $path : 'assets/' . $path;
+        $this->writeBundleFile($publicPath, self::SECRET);
         foreach (['', '/demo'] as $prefix) {
-            $this->assertFailure($this->request($prefix, $path));
+            $this->assertFailure($this->request($prefix, $publicPath));
             // Prozentkodierung darf die Dateiklassifikation nicht umgehen.
             $encoded = implode('/', array_map(
                 static fn (string $segment): string => '%' . bin2hex($segment[0]) . substr($segment, 1),
-                explode('/', $path),
+                explode('/', $publicPath),
             ));
             $this->assertFailure($this->request($prefix, $encoded));
         }
@@ -238,10 +239,10 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         self::assertTrue(symlink($this->root . '/secret.txt', $this->root . '/dist/assets/file.txt'));
         self::assertTrue(symlink($this->root . '/dist-private', $this->root . '/dist/assets/sibling'));
         self::assertTrue(symlink($this->root . '/dist/assets/file.txt', $this->root . '/dist/assets/chain.txt'));
-        self::assertTrue(symlink($this->root . '/secret.txt', $this->root . '/dist/private'));
+        self::assertTrue(symlink($this->root . '/secret.txt', $this->root . '/dist/assets/private'));
 
         foreach (['', '/demo'] as $prefix) {
-            foreach (['assets/file.txt', 'assets/sibling/secret.txt', 'assets/chain.txt', 'private'] as $path) {
+            foreach (['assets/file.txt', 'assets/sibling/secret.txt', 'assets/chain.txt', 'assets/private'] as $path) {
                 $response = $this->request($prefix, $path);
                 self::assertSame(404, $response->getStatusCode(), $prefix . '/' . $path);
                 self::assertStringNotContainsString(self::SECRET, (string) $response->getBody());
@@ -266,9 +267,9 @@ final class SpaStaticFileServerSecurityTest extends TestCase
     {
         $targets = ['.env', '.private/token.txt', 'private/config.php'];
         foreach ($targets as $index => $target) {
-            $this->writeBundleFile($target, self::SECRET);
+            $this->writeBundleFile('assets/' . $target, self::SECRET);
             $alias = 'assets/published-' . $index . '.js';
-            self::assertTrue(symlink($this->root . '/dist/' . $target, $this->root . '/dist/' . $alias));
+            self::assertTrue(symlink($this->root . '/dist/assets/' . $target, $this->root . '/dist/' . $alias));
             foreach (['', '/demo'] as $prefix) {
                 $this->assertFailure($this->request($prefix, $alias));
             }
@@ -278,9 +279,9 @@ final class SpaStaticFileServerSecurityTest extends TestCase
     public function test_permits_internal_symlinks_to_public_files_and_directories(): void
     {
         self::assertTrue(symlink('app.js', $this->root . '/dist/assets/alias.js'));
-        self::assertTrue(symlink('assets', $this->root . '/dist/public'));
+        self::assertTrue(symlink('.', $this->root . '/dist/assets/public'));
         foreach (['', '/demo'] as $prefix) {
-            foreach (['assets/alias.js', 'public/app.js'] as $path) {
+            foreach (['assets/alias.js', 'assets/public/app.js'] as $path) {
                 $response = $this->request($prefix, $path);
                 self::assertSame(200, $response->getStatusCode());
                 self::assertSame(self::PUBLIC_JS, (string) $response->getBody());
@@ -350,9 +351,9 @@ final class SpaStaticFileServerSecurityTest extends TestCase
 
     public function test_existing_directories_are_never_listed_or_returned_as_navigation(): void
     {
-        $this->writeBundleFile('documents/secret.txt', self::SECRET);
+        $this->writeBundleFile('assets/documents/secret.txt', self::SECRET);
         foreach (['', '/demo'] as $prefix) {
-            foreach (['documents', 'documents/', 'assets', 'assets/'] as $path) {
+            foreach (['assets/documents', 'assets/documents/', 'assets', 'assets/'] as $path) {
                 $this->assertFailure($this->request($prefix, $path));
             }
         }
@@ -532,7 +533,7 @@ final class SpaStaticFileServerSecurityTest extends TestCase
     public function test_missing_production_bundle_fails_during_bootstrap_with_internal_context(): void
     {
         $this->expectException(FilesystemException::class);
-        $this->expectExceptionMessage($this->root . '/missing-dist');
+        $this->expectExceptionMessage($this->root . '/dist/assets/missing-dist');
         $this->middleware(bundleDir: $this->root . '/missing-dist');
     }
 
@@ -1407,10 +1408,10 @@ final class SpaStaticFileServerSecurityTest extends TestCase
     public function test_production_never_serves_reserved_vite_files_but_keeps_normal_sources_public(): void
     {
         foreach (['@vite/client', '@vite/env', '@id/module', '@fs/workspace/main.ts'] as $path) {
-            $this->writeBundleFile($path, self::SECRET);
+            $this->writeBundleFile('assets/' . $path, self::SECRET);
         }
-        $this->writeBundleFile('src/main.ts', self::PUBLIC_JS);
-        $this->writeBundleFile('boot/client', self::PUBLIC_JS);
+        $this->writeBundleFile('assets/src/main.ts', self::PUBLIC_JS);
+        $this->writeBundleFile('assets/boot/client', self::PUBLIC_JS);
 
         foreach (['', '/demo'] as $prefix) {
             $html = new ViteAutoHtml(
@@ -1425,7 +1426,7 @@ final class SpaStaticFileServerSecurityTest extends TestCase
                 self::assertStringNotContainsString('Vite development resource', (string) $response->getBody());
             }
             foreach (['src/main.ts', 'boot/client'] as $path) {
-                $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/' . $path));
+                $response = $this->process($middleware, new ServerRequest(uri: $prefix . '/assets/' . $path));
                 self::assertSame(200, $response->getStatusCode());
                 self::assertSame(self::PUBLIC_JS, (string) $response->getBody());
             }
@@ -1572,8 +1573,9 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         $app = new BraceApp($environment, url_prefix: $prefix);
         $app->addModule(new BraceRequestLaminasModule());
         $middleware = new SpaStaticFileServerMw(
-            $bundleDir ?? $this->root . '/dist',
-            $html ?? new ViteAutoHtml(development: $development, startHtml: '<main>' . self::SHELL . '</main>'),
+            rootDir: $this->root . '/dist',
+            html: $html ?? new ViteAutoHtml(development: $development, startHtml: '<main>' . self::SHELL . '</main>'),
+            bundleDir: $bundleDir === null ? 'dist' : basename($bundleDir),
             mount: $mount,
         );
         $middleware->_setApp($app);
