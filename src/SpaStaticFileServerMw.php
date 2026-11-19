@@ -43,7 +43,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      * Configure SPA delivery after the application's API middleware.
      *
      * Development only serves the HTML shell; Vite serves source, assets and HMR.
-     * Production reads files from an existing Vite output directory.
+     * Production serves files only from rootDir/assetDir and requires
+     * rootDir/assetDir/bundleDir for the generated build.
      *
      * @param PhoreDirectory|string $rootDir Frontend root directory.
      * @param string $assetDir Public files folder relative to rootDir.
@@ -208,7 +209,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
                 : $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
-        // Nur reguläre öffentliche Dateien aus dem gebundenen Bundle lesen.
+        // Nur Dateien innerhalb des oeffentlichen Asset-Verzeichnisses lesen.
         if (!$this->development) {
             try {
                 $this->assetDirectory->assertDirectory();
@@ -360,7 +361,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             return $this->errorResponse($request, 404, 'SPA asset not found.');
         }
 
-        // Auch das reale Symlink-Ziel muss innerhalb der Bundle-Root öffentlich sein.
+        // Auch das reale Symlink-Ziel muss innerhalb der Asset-Root oeffentlich sein.
         $resolved = realpath((string) $file);
         if ($resolved === false) {
             return $this->errorResponse($request, 500, 'Unable to read the SPA asset.');
