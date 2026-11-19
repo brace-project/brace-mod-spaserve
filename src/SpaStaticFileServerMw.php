@@ -223,7 +223,11 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             try {
                 $assetPrefix = $this->configuredAssetDir . '/';
                 if (str_starts_with($relativePath, $assetPrefix)) {
-                    $assetResponse = $this->tryStaticFile(substr($relativePath, strlen($assetPrefix)), $request);
+                    $assetPath = substr($relativePath, strlen($assetPrefix));
+                    if ($assetPath === '') {
+                        return $this->missingAssetResponse($request, $relativePath);
+                    }
+                    $assetResponse = $this->tryStaticFile($assetPath, $request);
                     if ($assetResponse !== null) {
                         return $assetResponse;
                     }
