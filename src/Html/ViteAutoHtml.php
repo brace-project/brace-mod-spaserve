@@ -58,6 +58,7 @@ final class ViteAutoHtml extends HtmlGenerator
     {
         $url_prefix = $this->normalizeBasePath($url_prefix);
         $this->url_prefix = $url_prefix;
+        $this->baseHref = $url_prefix;
         $this->apiBaseUrl = rtrim(
             $this->configuredApiBaseUrl !== ''
                 ? $this->configuredApiBaseUrl
