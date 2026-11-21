@@ -204,6 +204,9 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        $useViteProxy = $this->development
+            && $this->app->environmentType === EnvironmentType::DEVELOPMENT
+            && $request->getHeaderLine('vite-dev-proxy') === '1';
         // Auch fehlerhafte Daten eines vorgeschalteten HTTP-Adapters ablehnen.
         $rawPath = $request->getUri()->getPath();
         if (strlen($rawPath) > self::MAX_PATH_BYTES) {
@@ -248,8 +251,14 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         {
             try {
                 $this->assetDirectory->assertDirectory();
-                if (!$this->development) {
-                    $this->bundleDirectory->assertDirectory();
+                if (!$useViteProxy) {
+                    $bundleDir = phore_dir($this->assetRoot . '/' . $this->configuredBundleDir)->assertDirectory();
+                    $bundleRoot = realpath((string) $bundleDir);
+                    if ($bundleRoot === false
+                        || !str_starts_with($bundleRoot, rtrim($this->assetRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR)
+                    ) {
+                        throw new FilesystemException("Cannot resolve SPA bundle directory '$bundleDir'.");
+                    }
                 }
             } catch (FilesystemException) {
                 return $this->errorResponse($request, 500, 'Unable to read the SPA bundle.');
@@ -288,7 +297,15 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         }
 
         try {
-            $html = $this->html->render();
+            $generator = clone $this->html;
+            if ($generator instanceof ViteAutoHtml) {
+                $generator->development = $useViteProxy;
+                $generator->setApplicationUrls(
+                    $this->mount,
+                    phore_uri($this->mount . '/' . trim($this->apiMountPath, '/'))->formatUri(trailingSlash: false),
+                );
+            }
+            $html = $generator->render();
         } catch (\Throwable) {
             // Fehler im HTML-Generator dürfen keine internen Details ausgeben.
             return $this->errorResponse($request, 500, 'Unable to render the SPA page.');
@@ -298,7 +315,11 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             $request,
             $html,
             200,
-            ['Content-Type' => 'text/html; charset=utf-8', 'Vary' => self::FALLBACK_VARY],
+            [
+                'Content-Type' => 'text/html; charset=utf-8',
+                'Vary' => self::FALLBACK_VARY,
+                ...($this->development ? ['Cache-Control' => 'no-store'] : []),
+            ],
         );
     }
 

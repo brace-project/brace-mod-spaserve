@@ -20,6 +20,7 @@ export default defineConfig({
     proxy: {
       "^(?!/(?:e/)?@vite|/(?:e/)?@fs/|/(?:e/)?@id/|/e/src/|/docs/_src/|/node_modules/|/workspaces/|.*\\.(?:js|css|ts|tsx|vue|svelte|scss|sass|less|map)(?:\\?.*)?$).*": {
         target: "http://127.0.0.1:80",
+        headers: { 'vite-dev-proxy': '1' },
         changeOrigin: false,
         autoRewrite: true,
       },

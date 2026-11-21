@@ -553,9 +553,39 @@ final class SpaStaticFileServerSecurityTest extends TestCase
     public function test_development_can_render_without_a_production_bundle(): void
     {
         $middleware = $this->middleware(development: true, bundleDir: $this->root . '/missing-dist');
-        $response = $this->process($middleware, new ServerRequest(uri: '/dashboard'));
+        $response = $this->process($middleware, (new ServerRequest(uri: '/dashboard'))->withHeader('vite-dev-proxy', '1'));
         self::assertSame(200, $response->getStatusCode());
         self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+    }
+
+    public function test_proxy_header_selects_vite_per_request_only_in_development(): void
+    {
+        foreach ([false, true] as $development) {
+            $html = new ViteAutoHtml(javascript: ['assets/dist/app.js']);
+            $middleware = $this->middleware(development: $development, html: $html);
+            foreach (['1', '', '0', '1'] as $header) {
+                $request = new ServerRequest(uri: '/dashboard');
+                if ($header !== '') {
+                    $request = $request->withHeader('vite-dev-proxy', $header);
+                }
+                $response = $this->process($middleware, $request);
+                self::assertSame(200, $response->getStatusCode());
+                $body = (string) $response->getBody();
+                if ($development && $header === '1') {
+                    self::assertStringContainsString('/@vite/client', $body);
+                    self::assertStringNotContainsString('assets/dist/app.js', $body);
+                } else {
+                    self::assertStringNotContainsString('/@vite/client', $body);
+                    self::assertStringContainsString('assets/dist/app.js', $body);
+                }
+            }
+        }
+    }
+
+    public function test_direct_development_request_requires_a_bundle(): void
+    {
+        $middleware = $this->middleware(development: true, bundleDir: $this->root . '/missing-dist');
+        $this->assertFailure($this->process($middleware, new ServerRequest(uri: '/dashboard')), 500);
     }
 
     public function test_missing_production_bundle_fails_during_bootstrap_with_internal_context(): void

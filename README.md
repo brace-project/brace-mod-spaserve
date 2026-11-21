@@ -69,7 +69,7 @@ requests are forwarded unchanged to Brace. Do not add separate `/api` or
 `/assets` proxy rules that override that selection. Production assets are
 served by Brace without Vite. The asset directory must exist
 in both environments; `src/` and other frontend paths remain private. The build
-directory must exist in production, but not during development.
+directory must exist in production and for direct backend requests, but is not needed for development requests marked by the Vite proxy.
 
 The generated HTML sets a document base from the effective SPA mount. Without
 an application prefix the HTML contains `<base href="/">`; for `mount: '/demo'`
@@ -104,7 +104,7 @@ Run Brace on port 80 and Vite on port 4000; open the **Vite** URL in the browser
 The middleware does not configure Vite automatically. The emitted paths are
 `assets/dist/app.js` and `assets/dist/app.css`. In development the bundle directory need not exist. In production it must exist before Brace starts. Backend routes under `excludePaths` continue to the next middleware, matching an exact path or a slash-delimited child path. Excludes starting with `/` are absolute URL paths (for example `/api` stays `/api` even with SPA mount `/e`); excludes without a leading slash are relative to the SPA mount (for example `api` becomes `/e/api`). When migrating a mount-relative exclusion such as `/api` under `/demo`, use `api` instead. Requests outside SPA-Serve's URL areas are also delegated, so the middleware can be placed directly before backend routing without an application-side path callback. Missing asset paths return 404; navigation paths return the SPA shell.
 
-`ViteAutoHtml` also supports `appBasePath`, `apiBaseUrl`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startHtml`. `startHtml` is trusted application HTML and is inserted unchanged at the beginning of `<body>`, before the generated module scripts. It can therefore contain complete nested startup markup instead of describing only one element. It must not contain untrusted user input. ViteAutoHtml emits `/@vite/client` and `devEntrypoint` in development, and the configured CSS/JavaScript bundle in production. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
+`ViteAutoHtml` also supports `appBasePath`, `apiBaseUrl`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startHtml`. `startHtml` is trusted application HTML and is inserted unchanged at the beginning of `<body>`, before the generated module scripts. It can therefore contain complete nested startup markup instead of describing only one element. It must not contain untrusted user input. When bound to SPA-Serve, ViteAutoHtml emits `/@vite/client` and `devEntrypoint` for marked development proxy requests, and the configured CSS/JavaScript bundle otherwise. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
 
 The middleware rejects unclean, once-decoded incoming URL paths with
 `phore_uri($path)->isClean()`; it never repairs user-supplied traversal.
@@ -149,6 +149,26 @@ SPA-Serve delegates the original request to the next middleware rather than
 serving HTML. `excludePaths` continues to bypass SPA-Serve earlier in the
 request flow. These patterns select HTML-routing responsibility, **not access
 authorization**.
+
+## Switching between Vite and built assets
+
+Vite must mark forwarded requests in its `server.proxy` rule:
+
+```ts
+headers: { 'vite-dev-proxy': '1' },
+```
+
+SPA-Serve selects Vite scripts only when Brace is in development, development
+has not been disabled in `ViteAutoHtml`, and the request header is exactly `1`.
+Direct backend requests without this header use the configured CSS/JavaScript
+bundle, even in development. A production request always uses the bundle;
+the header cannot enable development in production. Selection is per request,
+so switching ports does not retain the previous request's mode.
+
+Build the bundle before accessing Brace directly. A missing bundle produces a
+safe server error for direct requests; proxied Vite requests need no bundle.
+The header selects assets, not authentication, and is not a security credential.
+Keep development servers private. See `examples/demo/vite.config.ts`.
 
 ## Development proxy diagnostics
 
