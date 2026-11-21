@@ -477,7 +477,11 @@ final class SpaStaticFileServerSecurityTest extends TestCase
 
         // Ein expliziter Mount überschreibt ausschließlich die SPA-Zuordnung.
         $override = $this->middleware('/demo', mount: '/other');
-        $this->assertFailure($this->process($override, new ServerRequest(uri: '/demo/assets/app.js')));
+        $response = $this->process($override, new ServerRequest(uri: '/demo/assets/app.js'));
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame(self::PUBLIC_JS, (string) $response->getBody());
+        self::assertSame('text/javascript; charset=utf-8', $response->getHeaderLine('Content-Type'));
+        self::assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'));
         $response = $this->process($override, new ServerRequest(uri: '/other/assets/app.js'));
         self::assertSame(200, $response->getStatusCode());
         self::assertSame(self::PUBLIC_JS, (string) $response->getBody());
@@ -530,11 +534,15 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         }
     }
 
-    public function test_development_never_reads_existing_local_build_files(): void
+    public function test_development_serves_public_assets_without_exposing_private_frontend_files(): void
     {
         $this->writeBundleFile('download', self::SECRET);
         foreach (['', '/demo'] as $prefix) {
-            $this->assertFailure($this->request($prefix, 'assets/app.js', development: true));
+            $response = $this->request($prefix, 'assets/app.js', development: true);
+            self::assertSame(200, $response->getStatusCode());
+            self::assertSame(self::PUBLIC_JS, (string) $response->getBody());
+            self::assertSame('text/javascript; charset=utf-8', $response->getHeaderLine('Content-Type'));
+            self::assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'));
             $response = $this->request($prefix, 'download', development: true);
             self::assertSame(200, $response->getStatusCode());
             self::assertStringContainsString(self::SHELL, (string) $response->getBody());
