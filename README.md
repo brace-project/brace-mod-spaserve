@@ -32,9 +32,13 @@ $app->addMiddleware(new SpaStaticFileServerMw(
 
 `SpaStaticFileServerMw` uses `BraceApp::$appBasePath` as its mount by default in development and production and passes the application URLs to `ViteAutoHtml`. Vite forwards navigation paths unchanged, so the application base path remains effective during development. Requests outside the configured path receive a descriptive 404 response. Pass `mount` explicitly to override the SPA mount. The `rootDir` is the frontend directory. `assetDir` defaults to `assets` and
 `bundleDir` defaults to `dist`, giving `rootDir/assets/dist`. Both names must be
-clean relative directory paths. Production only serves files below `rootDir/assets`
-via URLs such as `/assets/images/logo.svg` and `/assets/dist/app.js` (relative
-to the SPA mount); `src/` and other frontend paths remain private. The build
+clean relative directory paths. Both environments serve public files below `rootDir/assets`
+via URLs such as `/assets/images/logo.svg` and `/assets/dist/app.js` relative
+to the application's URL prefix, independently of an explicit SPA mount. Existing
+SPA-mount-relative asset URLs remain supported for compatibility. Forward all public
+asset requests to Brace in Vite's proxy, including CSS and JavaScript; Vite handles
+source modules and HMR, not this public directory. The asset directory must exist
+in both environments; `src/` and other frontend paths remain private. The build
 directory must exist in production, but not during development.
 
 The generated HTML sets a document base from the effective SPA mount. Without

@@ -301,6 +301,26 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         }
     }
 
+    public function test_public_assets_are_served_in_both_environments_outside_the_spa_mount(): void
+    {
+        foreach (['', '/demo'] as $prefix) {
+            foreach ([false, true] as $development) {
+                $middleware = $this->middleware($prefix, development: $development, mount: $prefix . '/e');
+                foreach (['GET', 'HEAD'] as $method) {
+                    $response = $this->process($middleware, new ServerRequest(
+                        uri: $prefix . '/assets/app.js', method: $method,
+                    ));
+                    self::assertSame(200, $response->getStatusCode());
+                    self::assertSame($method === 'HEAD' ? '' : self::PUBLIC_JS, (string) $response->getBody());
+                    self::assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'));
+                }
+                $this->assertFailure($this->process($middleware, new ServerRequest(
+                    uri: $prefix . '/assets/%2e%2e/secret.txt', method: 'GET',
+                )));
+            }
+        }
+    }
+
     public static function publicFiles(): iterable
     {
         yield 'CSS' => ['assets/app.css', 'assets/app.css', 'body { color: red; }', 'text/css; charset=utf-8'];
