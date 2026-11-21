@@ -52,7 +52,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      * @param string $bundleDir Build folder relative to assetDir.
      * @param HtmlGenerator $html HTML shell for client side routes.
      * @param string $mount SPA URL prefix.
-     * @param list<string> $excludePaths Backend paths that must reach the next handler.
+     * @param list<string> $excludePaths Backend paths delegated to the next handler; leading slash is URL-absolute, otherwise relative to mount.
      * @param list<string>|null $spaRoutes SPA HTML route patterns relative to mount; null permits all.
      * @throws \RuntimeException If the production bundle directory is missing.
      * @see ViteAutoHtml
@@ -225,7 +225,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         $assetBase = rtrim($this->assetMount, '/') . '/' . $this->configuredAssetDir;
         $publicAsset = $path === $assetBase || str_starts_with($path, $assetBase . '/');
         if (!$mountedPath && !$viteResource && !$publicAsset) {
-            return $this->errorResponse($request, 404, 'Requested path is outside the configured SPA URL prefix.');
+            return $handler->handle($request);
         }
         if (!in_array($request->getMethod(), ['GET', 'HEAD'], true)) {
             return $this->errorResponse($request, 405, 'SPA delivery only supports GET and HEAD.', ['Allow' => 'GET, HEAD']);
@@ -747,10 +747,9 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
     private function resolveExcludedPath(string $path): string
     {
-        $path = $this->normalizeMount($path);
-        if ($this->isMountedPath($path)) {
-            return $path;
+        if (str_starts_with($path, '/')) {
+            return $this->normalizeMount($path);
         }
-        return phore_uri($this->mount . $path)->formatUri(trailingSlash: false);
+        return phore_uri(rtrim($this->mount, '/') . '/' . $path)->formatUri(trailingSlash: false);
     }
 }

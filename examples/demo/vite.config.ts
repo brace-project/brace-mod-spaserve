@@ -11,30 +11,30 @@ export default defineConfig({
       build: true,
     }),
   ],
-  // Vite is the browser-facing server; Brace listens behind it on port 8080.
+  // Development only: Vite forwards application requests unchanged to Brace.
   server: {
     port: 4000,
     strictPort: true,
+    host: "0.0.0.0",
+    allowedHosts: true,
     proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:8080',
+      "^(?!/(?:e/)?@vite|/(?:e/)?@fs/|/(?:e/)?@id/|/e/src/|/docs/_src/|/node_modules/|/workspaces/|.*\\.(?:js|css|ts|tsx|vue|svelte|scss|sass|less|map)(?:\\?.*)?$).*": {
+        target: "http://127.0.0.1:80",
         changeOrigin: false,
-      },
-      '^/(?!@vite/|@id/|@fs/|src/|node_modules/|.*\\.(?:js|css|ts|tsx|scss|map)$).*': {
-        target: 'http://127.0.0.1:8080',
-        changeOrigin: false,
+        autoRewrite: true,
       },
     },
+    hmr: true,
   },
   build: {
-    outDir: 'dist',
+    outDir: 'assets/dist',
     emptyOutDir: true,
     rollupOptions: {
       input: fileURLToPath(new URL('./src/main.ts', import.meta.url)),
       output: {
-        entryFileNames: 'assets/app.js',
-        chunkFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: (asset) => asset.name?.endsWith('.css') ? 'assets/app.css' : 'assets/[name]-[hash][extname]',
+        entryFileNames: 'app.js',
+        chunkFileNames: '[name]-[hash].js',
+        assetFileNames: (asset) => asset.name?.endsWith('.css') ? 'app.css' : '[name]-[hash][extname]',
       },
     },
   },
