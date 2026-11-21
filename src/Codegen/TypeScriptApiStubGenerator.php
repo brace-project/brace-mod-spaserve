@@ -102,20 +102,20 @@ final class TypeScriptApiStubGenerator
 
             $body = ($entry['body'] ?? null) instanceof SchemaType ? $this->renderType($entry['body']) : 'never';
             $methods = implode(' | ', array_map(fn (string $method): string => $this->quote(strtoupper($method)), $entry['methods']));
-            $out[] = sprintf('%s%s: ApiRoute<%s, %s, %s, %s, %s>;', $indent, $this->quote($name), $this->renderParams($entry['pathParams'] ?? []), $this->renderParams($entry['queryParams'] ?? []), $body, $this->renderType($entry['response']), $methods);
+            $out[] = sprintf('%s%s: ApiRoute<%s, %s, %s, %s, %s>;', $indent, $this->quote($name), $this->renderParams($entry['pathParams'] ?? []), $this->renderParams($entry['queryParams'] ?? [], $entry['queryOptional'] ?? [], $entry['queryOpen'] ?? false), $body, $this->renderType($entry['response']), $methods);
         }
 
         return $out;
     }
 
-    private function renderParams(array $params): string
+    private function renderParams(array $params, array $optional = [], bool $open = false): string
     {
-        if ($params === []) {
+        if ($params === [] && !$open) {
             return 'Record<string, never>';
         }
-        $items = [];
+        $items = $open ? ['[key: string]: unknown'] : [];
         foreach ($params as $name => $type) {
-            $items[] = $this->propertyName((string) $name) . ': ' . $this->renderType($type);
+            $items[] = $this->propertyName((string) $name) . (in_array($name, $optional, true) ? '?' : '') . ': ' . $this->renderType($type);
         }
         return '{ ' . implode('; ', $items) . ' }';
     }

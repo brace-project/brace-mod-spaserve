@@ -224,7 +224,7 @@ vendor/bin/brace spa-api-build
 
 Stub generation is driven by Vite through the `spa-api-build` command: on development-server startup, backend hot updates and production builds. Module registration and HTTP requests never generate stubs; there is no on-request generation option. Run the command above manually when needed. Generated output includes named routes, their typed parameters and response DTOs; unnamed routes are ignored. See the Vite workflow below.
 
-The registered route callback's parameter and return types (including PHPDoc collection types) are read with `phore/schema`. Router parameters such as `:userId` become path parameters, while other callback parameters become query parameters. Public DTO properties become TypeScript interfaces. `GeneratedFileWriter` compares the generated content and only replaces the target file when it changed, so repeated generation does not trigger Vite HMR or reloads unnecessarily.
+The registered route callback's parameter and return types (including PHPDoc collection types) are read with `phore/schema`. Router parameters such as `:userId` become path parameters; query parameters require explicit `BraceQuery` declarations. A parameter named `body` supplies the request body for POST/PUT/PATCH routes. Public DTO properties become TypeScript interfaces. `GeneratedFileWriter` compares the generated content and only replaces the target file when it changed, so repeated generation does not trigger Vite HMR or reloads unnecessarily.
 
 ### Vite integration
 
@@ -286,5 +286,23 @@ const user = await API.User.Get.request({
 
 const remoteAPI = createAPI({ baseUrl: 'https://example.test' });
 ```
+
+### Explicit query bindings
+
+Query parameters are declared using `Brace\Router\Attributes\BraceQuery` on
+controller methods or parameters. The generator uses the router's shared
+`QueryParameterResolver`: query aliases become wire keys, PHP defaults become
+optional TypeScript properties, and unbound method declarations default to string
+unless `type` is specified. Method-only declarations can provide `default`.
+
+Unannotated non-path parameters are no longer implicitly classified as query
+parameters. Annotate existing query bindings when migrating. A `$query` parameter
+permits additional keys and generates an open string index signature alongside
+the declared properties. At runtime, `QueryParamsValidator` validates declared
+keys and rejects unknown keys unless `$query` is present. This requires a router
+version providing `BraceQuery`, `QueryParameterResolver` and `QueryParamsValidator`.
+
+Run the focused rendering check with `php tests/QueryParameterCodegenTest.php`
+from the package checkout inside the application's Composer vendor tree.
 
 `API` uses the same origin by default. The generated types provide compile-time guidance; validation of HTTP payloads remains the application's responsibility. Duplicate route names and conflicting DTO short names are rejected during generation.

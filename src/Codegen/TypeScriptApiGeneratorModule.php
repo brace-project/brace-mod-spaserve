@@ -65,6 +65,9 @@ final class TypeScriptApiGeneratorModule implements BraceModule
             $path = $this->stripPathPrefix($path, $apiMountPath);
             $path = preg_replace_callback('/::?([A-Za-z_][A-Za-z0-9_]*)/', static fn (array $match): string => '{' . $match[1] . '}', $path) ?? $path;
             $function = $this->parseCallback($route['call']);
+            $queryResolver = new \Brace\Router\QueryParameterResolver();
+            $reflection = $queryResolver->reflect($route['call']);
+            $queryDefinitions = $queryResolver->resolve($reflection);
             preg_match_all('/\{([A-Za-z_][A-Za-z0-9_]*)\}/', $path, $matches);
             $pathNames = array_flip($matches[1] ?? []);
             $httpMethods = array_values(array_unique(array_map('strtoupper', explode('|', $methods))));
@@ -77,10 +80,14 @@ final class TypeScriptApiGeneratorModule implements BraceModule
                     $pathParams[$parameter->name] = $parameter->type;
                 } elseif ($acceptsBody && $parameter->name === 'body') {
                     $body = $parameter->type;
-                } else {
-                    $queryParams[$parameter->name] = $parameter->type;
                 }
                 $this->collectClasses($parameter->type, $classes, $parameter->nativeType);
+            }
+            foreach ($queryDefinitions as $name => $definition) {
+                $type = $definition['type'] === 'array'
+                    ? new ArraySchemaType(new \Phore\Schema\Schema\Type\PrimitiveSchemaType('string'), new \Phore\Schema\Schema\Type\PrimitiveSchemaType('mixed'))
+                    : new \Phore\Schema\Schema\Type\PrimitiveSchemaType($definition['type']);
+                $queryParams[$name] = $type;
             }
             foreach (array_keys($pathNames) as $pathName) {
                 if ($function->getParameter((string)$pathName) === null) {
@@ -96,6 +103,8 @@ final class TypeScriptApiGeneratorModule implements BraceModule
                 'body' => $body,
                 'pathParams' => $pathParams,
                 'queryParams' => $queryParams,
+                'queryOptional' => array_keys(array_filter($queryDefinitions, static fn (array $definition): bool => $definition['optional'])),
+                'queryOpen' => $queryResolver->acceptsAdditional($reflection),
             ];
         }
         ksort($classes);
