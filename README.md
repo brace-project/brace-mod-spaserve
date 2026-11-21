@@ -48,9 +48,15 @@ the Brace environment.
 
 SPA-Serve owns shell delivery and public assets. Configure URL responsibility
 through `mount`, `excludePaths` and optionally `spaRoutes`, not through duplicate
-router routes. Place API authentication before the API dispatcher; placing
-SPA-Serve before it makes the shell and assets public, not the API. Shell access
-control, when needed, must be configured deliberately before SPA-Serve.
+router routes. SPA-Serve normally serves the shell and assets without requiring
+authentication so the SPA can load and perform client-side authentication, for
+example using OpenID Connect or OAuth 2.0 Authorization Code with PKCE. The SPA
+initiates the identity-provider flow and processes its callback; SPA-Serve does
+not implement or gate that flow. API endpoints independently validate access
+tokens and enforce authorization for protected data and actions.
+Place API authentication before the API dispatcher; placing SPA-Serve before it
+makes the shell and assets public, not the API. Only if shell access itself must
+be restricted should additional access control be placed before SPA-Serve.
 
 `SpaStaticFileServerMw` uses `BraceApp::$appBasePath` as its mount by default in development and production and passes the application URLs to `ViteAutoHtml`. Vite forwards navigation paths unchanged, so the application base path remains effective during development. Requests outside the SPA mount and the configured public asset/Vite URL areas are passed unchanged to the next middleware. Pass `mount` explicitly to override the SPA mount. The `rootDir` is the frontend directory. `assetDir` defaults to `assets` and
 `bundleDir` defaults to `dist`, giving `rootDir/assets/dist`. Both names must be
