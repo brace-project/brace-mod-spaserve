@@ -203,16 +203,21 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        $rawPath = $request->getUri()->getPath();
+        $useViteProxy = $this->development
+            && $this->app->environmentType === EnvironmentType::DEVELOPMENT
+            && $request->getHeaderLine('vite-dev-proxy') === '1';
         $prefix = rtrim($this->assetMount, '/');
+        if ($useViteProxy && $prefix !== '') {
+            return $this->errorResponse($request, 400,
+                'SPA-Serve: Vite proxy mode requires an empty BraceApp::$url_prefix. Disable the URL prefix for Vite development.');
+        }
+
+        $rawPath = $request->getUri()->getPath();
         $decodedPath = rawurldecode($rawPath);
         if ($prefix !== '' && $decodedPath !== $prefix && !str_starts_with($decodedPath, $prefix . '/')) {
             return $handler->handle($request);
         }
 
-        $useViteProxy = $this->development
-            && $this->app->environmentType === EnvironmentType::DEVELOPMENT
-            && $request->getHeaderLine('vite-dev-proxy') === '1';
         // Auch fehlerhafte Daten eines vorgeschalteten HTTP-Adapters ablehnen.
         if (strlen($rawPath) > self::MAX_PATH_BYTES) {
             return $this->errorResponse($request, 414, 'SPA request path is too long.');

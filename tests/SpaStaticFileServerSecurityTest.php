@@ -1041,6 +1041,46 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         }
     }
 
+    public function test_vite_proxy_rejects_application_prefix_before_delegation(): void
+    {
+        foreach (['/demo', '/demo/'] as $prefix) {
+            foreach (['/', '/demo/', '/api/users'] as $path) {
+                $response = $this->process(
+                    $this->middleware($prefix, development: true),
+                    new ServerRequest(uri: $path, method: 'GET', headers: ['vite-dev-proxy' => '1']),
+                );
+                $this->assertFailure($response, 400);
+                self::assertSame(
+                    'SPA-Serve: Vite proxy mode requires an empty BraceApp::$url_prefix. Disable the URL prefix for Vite development.',
+                    (string) $response->getBody(),
+                );
+            }
+        }
+    }
+
+    public function test_prefix_restriction_only_applies_to_active_vite_proxy_mode(): void
+    {
+        foreach ([
+            ['', true, '1', null],
+            ['/', true, '1', null],
+            ['/demo', true, null, null],
+            ['/demo', true, '0', null],
+            ['/demo', false, '1', null],
+            ['/demo', true, '1', false],
+        ] as [$prefix, $development, $header, $htmlDevelopment]) {
+            $html = new ViteAutoHtml(development: $htmlDevelopment, startHtml: '<main>' . self::SHELL . '</main>');
+            $response = $this->process(
+                $this->middleware($prefix, development: $development, html: $html),
+                new ServerRequest(uri: rtrim($prefix, '/') . '/', method: 'GET', headers: [
+                    'Accept' => 'text/html',
+                    ...($header === null ? [] : ['vite-dev-proxy' => $header]),
+                ]),
+            );
+            self::assertSame(200, $response->getStatusCode());
+            self::assertStringContainsString(self::SHELL, (string) $response->getBody());
+        }
+    }
+
     public function test_exclusions_match_complete_paths_with_explicit_wildcards(): void
     {
         $cases = [
