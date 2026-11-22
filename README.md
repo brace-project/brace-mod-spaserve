@@ -275,6 +275,8 @@ Stub generation is driven by Vite through the `spa-api-build` command: on develo
 
 The registered route callback's parameter and return types (including PHPDoc collection types) are read with `phore/schema`. Router parameters such as `:userId` become path parameters; query parameters require explicit `BraceQuery` declarations. A parameter named `body` supplies the request body for POST/PUT/PATCH routes. Public DTO properties become TypeScript interfaces. `GeneratedFileWriter` compares the generated content and only replaces the target file when it changed, so repeated generation does not trigger Vite HMR or reloads unnecessarily.
 
+Generated paths omit the router's application prefix. If the API client supplies an additional base path such as `/api`, pass `apiBasePath: '/api'` to `TypeScriptApiGeneratorModule` to remove that path from matching routes as well. Only complete path segments are removed; other named routes remain unchanged. The default empty base path preserves route paths.
+
 ### Vite integration
 
 Install `vite-plugin-run` as a development dependency (`npm install -D vite-plugin-run`). Run Vite from the application repository root, where `vendor/bin/brace` and the Brace bootstrap are located. For a frontend root of `app.fe/` and backend sources under `app.be/`, configure the root `vite.config.ts` as follows:
