@@ -25,8 +25,7 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         private readonly SchemaParser $schemaParser = new SchemaParser(),
         private readonly TypeScriptApiStubGenerator $generator = new TypeScriptApiStubGenerator(),
         private readonly GeneratedFileWriter $writer = new GeneratedFileWriter(),
-        private readonly string $commandName = 'spa-api-build',
-        private readonly string $apiMountPath = '',
+        private readonly string $commandName = 'spa-api-build'
     ) {
     }
 
