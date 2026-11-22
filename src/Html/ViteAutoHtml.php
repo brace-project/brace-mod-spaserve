@@ -63,7 +63,7 @@ final class ViteAutoHtml extends HtmlGenerator
                 ? $this->configuredApiBaseUrl
                 : ($defaultApiBaseUrl !== '' ? $defaultApiBaseUrl : rtrim($url_prefix, '/') . '/api'),
             '/',
-        );
+        ) ?: '/';
 
         $resolvedCss = $this->development ? $this->additionalCss : [...$this->configuredCss, ...$this->additionalCss];
         $resolvedJavascript = $this->development

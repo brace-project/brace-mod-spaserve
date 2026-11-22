@@ -57,11 +57,9 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         $routes = [];
         $classes = [];
         $routerPrefix = $this->app->router->getPrefix();
-        $apiMountPath = phore_uri('/' . $this->apiMountPath)->formatUri(trailingSlash: false);
         foreach ($this->app->router->getNamedRoutes() as $route) {
             [$methods, $path] = explode('@', $route['route'], 2);
             $path = $this->stripPathPrefix($path, $routerPrefix);
-            $path = $this->stripPathPrefix($path, $apiMountPath);
             $path = preg_replace_callback('/::?([A-Za-z_][A-Za-z0-9_]*)/', static fn (array $match): string => '{' . $match[1] . '}', $path) ?? $path;
             $function = $this->parseCallback($route['call']);
             $queryResolver = new \Brace\Router\QueryParameterResolver();
