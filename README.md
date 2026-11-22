@@ -30,7 +30,7 @@ $app->setPipe([
             startHtml: '<demo-app><main id="content"></main></demo-app>',
         ),
         mount: '/e',
-        excludePaths: ['/api'],
+        excludePaths: ['/api/**'],
     ),
     new RouterEvalMiddleware(),
     // Insert the application's API authentication middleware here.
@@ -58,7 +58,7 @@ Place API authentication before the API dispatcher; placing SPA-Serve before it
 makes the shell and assets public, not the API. Only if shell access itself must
 be restricted should additional access control be placed before SPA-Serve.
 
-`SpaStaticFileServerMw` uses `BraceApp::$appBasePath` as its mount by default in development and production and passes the application URLs to `ViteAutoHtml`. Vite forwards navigation paths unchanged, so the application base path remains effective during development. Requests outside the SPA mount and the configured public asset/Vite URL areas are passed unchanged to the next middleware. Pass `mount` explicitly to override the SPA mount. The `rootDir` is the frontend directory. `assetDir` defaults to `assets` and
+`BraceApp::$url_prefix` is the outer URL boundary in development and production. Requests outside this prefix are delegated unchanged before SPA validation or resource detection. `mount`, `excludePaths`, `apiMountPath` and all local asset/Vite URLs are resolved relative to this prefix, even with a leading `/`; external URLs remain unchanged. For example, with prefix `/demo`, mount `/shop` resolves to `/demo/shop` and exclusion `/api/**` to `/demo/api/**`. `SpaStaticFileServerMw` uses the application prefix as its default mount and passes the application URLs to `ViteAutoHtml`. Vite forwards navigation paths unchanged, so the application base path remains effective during development. Requests outside the SPA mount and the configured public asset/Vite URL areas are passed unchanged to the next middleware. Pass `mount` explicitly to override the SPA mount. The `rootDir` is the frontend directory. `assetDir` defaults to `assets` and
 `bundleDir` defaults to `dist`, giving `rootDir/assets/dist`. Both names must be
 clean relative directory paths. Both environments serve public files below `rootDir/assets`
 via URLs such as `/assets/images/logo.svg` and `/assets/dist/app.js` relative
@@ -71,21 +71,20 @@ served by Brace without Vite. The asset directory must exist
 in both environments; `src/` and other frontend paths remain private. The build
 directory must exist in production and for direct backend requests, but is not needed for development requests marked by the Vite proxy.
 
-The generated HTML sets a document base from the effective SPA mount. Without
-an application prefix the HTML contains `<base href="/">`; for `mount: '/demo'`
-it contains `<base href="/demo/">`. The middleware derives the base from its
-effective `mount` for every `HtmlGenerator`, including plain HTML generators.
-`HtmlGenerator` defaults `baseHref` to `/` when used independently, but a
-middleware-bound generator always receives the normalized mount automatically.
+The generated HTML sets a document base from `BraceApp::$url_prefix`. Without
+an application prefix the HTML contains `<base href="/">`; for `url_prefix: '/demo'`
+it contains `<base href="/demo/">`, independently of an explicit SPA `mount`.
+The middleware applies the normalized application prefix to every `HtmlGenerator`,
+including plain HTML generators. Independently used `ViteAutoHtml` derives the
+base from its `url_prefix`; plain `HtmlGenerator` defaults `baseHref` to `/`.
 The base element is emitted immediately after the character-set declaration,
 before stylesheets and scripts, and its attribute is HTML-escaped.
 
-The generated HTML exposes two independent frontend settings:
+The generated HTML exposes the application URL prefix:
 
 ```html
 <base href="/demo/">
-<meta name="app-base-path" content="/demo/">
-<meta name="api-base-url" content="https://api.example.test/v1">
+<meta name="app-url-prefix" content="/demo/">
 ```
 
 The HTML `<base>` controls how browsers resolve relative asset URLs, links,
@@ -97,12 +96,12 @@ necessarily the current nested route. Client-side routers must still handle
 the SPA mount, History API navigation and their own route patterns. Use
 absolute or router-managed links when the destination must not be base-relative.
 
-`app-base-path` controls frontend routing, navigation and links. `api-base-url` controls API requests and may point to a different path or server. When `BraceApp::$apiBaseUrl` is omitted, it defaults to the application base path. An explicit API client configuration still has the highest priority.
+`app-url-prefix` is derived from `BraceApp::$url_prefix` by default, independently of an explicit SPA `mount`. It replaces the former `app-base-path` and `api-base-url` meta tags. API URLs must be configured by the API client when needed.
 
 Run Brace on port 80 and Vite on port 4000; open the **Vite** URL in the browser. The demo sets `strictPort: true`, `host: "0.0.0.0"`, `allowedHosts: true` and `hmr: true`, with proxy target `http://127.0.0.1:80`, `changeOrigin: false` and `autoRewrite: true`. This development server accepts all hostnames and listens on all interfaces; expose it only within a trusted development environment. The example in [`examples/demo`](examples/demo) shows its Vite configuration, source entrypoint and `npm run dev` / `npm run build` scripts. Configure Vite with `outDir: 'assets/dist'`, `entryFileNames: 'app.js'`,
 `chunkFileNames: '[name]-[hash].js'`, and `assetFileNames: 'app.css'` for CSS.
 The middleware does not configure Vite automatically. The emitted paths are
-`assets/dist/app.js` and `assets/dist/app.css`. In development the bundle directory need not exist. In production it must exist before Brace starts. Backend routes under `excludePaths` continue to the next middleware, matching an exact path or a slash-delimited child path. Excludes starting with `/` are absolute URL paths (for example `/api` stays `/api` even with SPA mount `/e`); excludes without a leading slash are relative to the SPA mount (for example `api` becomes `/e/api`). When migrating a mount-relative exclusion such as `/api` under `/demo`, use `api` instead. Requests outside SPA-Serve's URL areas are also delegated, so the middleware can be placed directly before backend routing without an application-side path callback. Missing asset paths return 404; navigation paths return the SPA shell.
+`assets/dist/app.js` and `assets/dist/app.css`. In development the bundle directory need not exist. In production it must exist before Brace starts. `excludePaths` matches complete URL paths: `/` matches only `/`, and `/api` only `/api`. Use `/api/**` for `/api`, `/api/` and all descendants (but not `/apix`). `*` matches within one path segment; `**` also matches across slashes. All exclusion patterns are relative to `url_prefix`, independently of the SPA mount and of a leading slash. With prefix `/demo`, both `/api/**` and `api/**` become `/demo/api/**`; `/` matches only `/demo/`. Requests outside SPA-Serve's URL areas are also delegated, so the middleware can be placed directly before backend routing without an application-side path callback. Missing asset paths return 404; navigation paths return the SPA shell.
 
 `ViteAutoHtml` also supports `appBasePath`, `apiBaseUrl`, `additionalCss`, `additionalJavascript`, `meta`, `title` and `startHtml`. `startHtml` is trusted application HTML and is inserted unchanged at the beginning of `<body>`, before the generated module scripts. It can therefore contain complete nested startup markup instead of describing only one element. It must not contain untrusted user input. When bound to SPA-Serve, ViteAutoHtml emits `/@vite/client` and `devEntrypoint` for marked development proxy requests, and the configured CSS/JavaScript bundle otherwise. It does not inspect Vite manifests. Avoid the legacy `EsbuildLoader`, `HttpProxy` and LiveReload setup for new applications.
 

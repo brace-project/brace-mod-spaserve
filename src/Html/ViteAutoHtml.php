@@ -58,6 +58,7 @@ final class ViteAutoHtml extends HtmlGenerator
     {
         $url_prefix = $this->normalizeBasePath($url_prefix);
         $this->url_prefix = $url_prefix;
+        $this->baseHref = $url_prefix;
         $this->apiBaseUrl = rtrim(
             $this->configuredApiBaseUrl !== ''
                 ? $this->configuredApiBaseUrl
@@ -75,8 +76,7 @@ final class ViteAutoHtml extends HtmlGenerator
             : [...$this->configuredJavascript, ...$this->additionalJavascript];
 
         $this->meta = array_merge([
-            'app-base-path' => $url_prefix,
-            'api-base-url' => $this->apiBaseUrl,
+            'app-url-prefix' => $url_prefix,
         ], $this->configuredMeta);
         $this->css = array_map(fn (string $path) => $this->resolvePath($path, $url_prefix), $resolvedCss);
         $this->javascript = array_map(fn (string $path) => $this->resolvePath($path, $url_prefix), $resolvedJavascript);
@@ -89,10 +89,10 @@ final class ViteAutoHtml extends HtmlGenerator
 
     private function resolvePath(string $path, string $basePath): string
     {
-        if ($path === '' || str_starts_with($path, '/') || preg_match('#^[a-z][a-z0-9+.-]*://#i', $path)) {
+        if ($path === '' || str_starts_with($path, '//') || preg_match('#^[a-z][a-z0-9+.-]*://#i', $path)) {
             return $path;
         }
 
-        return $basePath . ltrim($path, '/');
+        return rtrim($basePath, '/') . '/' . ltrim($path, '/');
     }
 }

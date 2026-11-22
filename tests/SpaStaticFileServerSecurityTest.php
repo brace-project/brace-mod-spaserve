@@ -1041,6 +1041,45 @@ final class SpaStaticFileServerSecurityTest extends TestCase
         }
     }
 
+    public function test_exclusions_match_complete_paths_with_explicit_wildcards(): void
+    {
+        $cases = [
+            ['/', '/', true],
+            ['/', '/users', false],
+            ['/api', '/api', true],
+            ['/api', '/api/', false],
+            ['/api', '/api/users', false],
+            ['/api/**', '/api', true],
+            ['/api/**', '/api/', true],
+            ['/api/**', '/api/users/42', true],
+            ['/api/**', '/apix', false],
+            ['/api/*', '/api/users', true],
+            ['/api/*', '/api/users/42', false],
+            ['/api/*', '/api', false],
+            ['api/**', '/demo/api/users', false],
+            ['api/**', '/api/users', true],
+        ];
+        foreach (['', '/demo'] as $prefix) {
+            foreach ($cases as [$pattern, $path, $excluded]) {
+                $middleware = $this->middleware($prefix, mount: '/');
+                $middleware->excludePaths = [$pattern];
+                $handler = new class implements RequestHandlerInterface {
+                    public ?ServerRequestInterface $received = null;
+
+                    public function handle(ServerRequestInterface $request): ResponseInterface
+                    {
+                        $this->received = $request;
+                        return new EmptyResponse(418);
+                    }
+                };
+                $request = new ServerRequest(uri: $path, method: 'POST');
+                $response = $middleware->process($request, $handler);
+                self::assertSame($excluded ? 418 : 405, $response->getStatusCode(), $pattern . ' vs ' . $path);
+                self::assertSame($excluded ? $request : null, $handler->received);
+            }
+        }
+    }
+
     public function test_negotiation_does_not_intercept_excluded_api_requests(): void
     {
         foreach (['', '/demo'] as $prefix) {

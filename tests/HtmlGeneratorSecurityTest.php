@@ -146,12 +146,6 @@ final class HtmlGeneratorSecurityTest extends TestCase
                 '/demo" data-x="<svg onload=alert(1)>',
                 '/demo&quot; data-x=&quot;&lt;svg onload=alert(1)&gt;/',
             ];
-            yield $mode . ' API URL' => [
-                $mode,
-                'apiBaseUrl',
-                'https://api.example.test/v1" data-x="<svg onload=alert(1)>',
-                'https://api.example.test/v1&quot; data-x=&quot;&lt;svg onload=alert(1)&gt;',
-            ];
         }
     }
 
@@ -169,7 +163,7 @@ final class HtmlGeneratorSecurityTest extends TestCase
             'additionalCss' => ['assets/extra.css'],
             'additionalJavascript' => ['assets/extra.js'],
         ])->render();
-        $name = $field === 'url_prefix' ? 'app-base-path' : 'api-base-url';
+        $name = 'app-url-prefix';
         self::assertStringContainsString('<meta name="' . $name . '" content="' . $encoded . '">', $output);
 
         // Mount-Werte fließen zusätzlich in relative Asset-URLs ein.
@@ -180,7 +174,7 @@ final class HtmlGeneratorSecurityTest extends TestCase
 
         $document = $this->parse($output);
         $development = $mode === 'vite-development';
-        $this->assertSafeStructure($document, $development ? 3 : 2, $development ? 1 : 2, 4);
+        $this->assertSafeStructure($document, $development ? 3 : 2, $development ? 1 : 2, 3);
         self::assertSame($payload . ($field === 'url_prefix' ? '/' : ''), $this->meta($document, $name)->getAttribute('content'));
     }
 
@@ -265,7 +259,7 @@ final class HtmlGeneratorSecurityTest extends TestCase
 
     private function defaultMetaCount(string $mode): int
     {
-        return $mode === 'html' ? 2 : 4;
+        return $mode === 'html' ? 2 : 3;
     }
 
     private function parse(string $html): DOMDocument

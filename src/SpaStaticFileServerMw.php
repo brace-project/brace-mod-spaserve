@@ -52,7 +52,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      * @param string $bundleDir Build folder relative to assetDir.
      * @param HtmlGenerator $html HTML shell for client side routes.
      * @param string $mount SPA URL prefix.
-     * @param list<string> $excludePaths Backend paths delegated to the next handler; leading slash is URL-absolute, otherwise relative to mount.
+     * @param list<string> $excludePaths Full-path glob patterns delegated to the next handler; all patterns are relative to the application URL prefix.
      * @param list<string>|null $spaRoutes SPA HTML route patterns relative to mount; null permits all.
      * @throws \RuntimeException If the production bundle directory is missing.
      * @see ViteAutoHtml
@@ -64,7 +64,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         string $assetDir = 'assets',
         string $bundleDir = 'dist',
         ?string $mount = null,
-        public array $excludePaths = ['/api'],
+        public array $excludePaths = ['/api/**'],
         public string $apiMountPath = '/api',
         public ?array $spaRoutes = null,
     ) {
@@ -116,8 +116,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
     public function _setApp(BraceApp $app): void
     {
         parent::_setApp($app);
-        $this->mount = $this->normalizeMount($this->configuredMount ?? $app->url_prefix);
         $this->assetMount = $this->normalizeMount($app->url_prefix);
+        $this->mount = $this->normalizeMount($this->assetMount . '/' . ltrim($this->configuredMount ?? '', '/'));
         $this->development = $this->configuredDevelopment
             ?? ($app->environmentType === EnvironmentType::DEVELOPMENT);
         // Public files must stay inside the frontend root's asset directory.
@@ -150,13 +150,12 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         if ($this->html instanceof ViteAutoHtml) {
             $this->html->development = $this->development;
             $this->html->setApplicationUrls(
-                $this->mount,
-                phore_uri($this->mount . '/' . trim($this->apiMountPath, '/'))->formatUri(trailingSlash: false),
+                $this->assetMount,
+                phore_uri($this->assetMount . '/' . trim($this->apiMountPath, '/'))->formatUri(trailingSlash: false),
             );
         }
-        // Der effektive SPA-Mount bestimmt die URL-Basis jedes HTML-Generators.
-        $this->html->baseHref = rtrim($this->mount, '/') . '/';
-        $this->html->meta['app-env'] = $app->environmentType->value;
+        // Der App-Prefix bestimmt die URL-Basis jedes HTML-Generators.
+        $this->html->baseHref = rtrim($this->assetMount, '/') . '/';
     }
 
     /**
@@ -204,11 +203,17 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
      */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        $rawPath = $request->getUri()->getPath();
+        $prefix = rtrim($this->assetMount, '/');
+        $decodedPath = rawurldecode($rawPath);
+        if ($prefix !== '' && $decodedPath !== $prefix && !str_starts_with($decodedPath, $prefix . '/')) {
+            return $handler->handle($request);
+        }
+
         $useViteProxy = $this->development
             && $this->app->environmentType === EnvironmentType::DEVELOPMENT
             && $request->getHeaderLine('vite-dev-proxy') === '1';
         // Auch fehlerhafte Daten eines vorgeschalteten HTTP-Adapters ablehnen.
-        $rawPath = $request->getUri()->getPath();
         if (strlen($rawPath) > self::MAX_PATH_BYTES) {
             return $this->errorResponse($request, 414, 'SPA request path is too long.');
         }
@@ -219,7 +224,7 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
 
         foreach ($this->excludePaths as $excludePath) {
             $excludePath = $this->resolveExcludedPath($excludePath);
-            if ($path === $excludePath || str_starts_with($path, $excludePath . '/')) {
+            if ($this->matchesExcludedPath($path, $excludePath)) {
                 return $handler->handle($request);
             }
         }
@@ -301,10 +306,11 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
             if ($generator instanceof ViteAutoHtml) {
                 $generator->development = $useViteProxy;
                 $generator->setApplicationUrls(
-                    $this->mount,
-                    phore_uri($this->mount . '/' . trim($this->apiMountPath, '/'))->formatUri(trailingSlash: false),
+                    $this->assetMount,
+                    phore_uri($this->assetMount . '/' . trim($this->apiMountPath, '/'))->formatUri(trailingSlash: false),
                 );
             }
+            $generator->meta['app-environment'] = $this->app->environmentType->value;
             $html = $generator->render();
         } catch (\Throwable) {
             // Fehler im HTML-Generator dürfen keine internen Details ausgeben.
@@ -363,6 +369,10 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
     {
         // Standard-URLs können global oder unter Vites konfiguriertem Base liegen.
         $candidates = [$path];
+        $prefix = rtrim($this->assetMount, '/');
+        if ($prefix !== '' && str_starts_with($path, $prefix . '/')) {
+            $candidates[] = substr($path, strlen($prefix));
+        }
         if ($this->mount !== '/' && $this->isMountedPath($path)) {
             $candidates[] = phore_uri($path)->rel($this->mount)->formatUri(leadingSlash: true, trailingSlash: str_ends_with($path, '/'));
         }
@@ -394,10 +404,8 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         ) {
             return null;
         }
-        // Wie ViteAutoHtml: relative URLs am Mount auflösen, absolute unverändert.
-        if (!str_starts_with($url, '/')) {
-            $url = rtrim($this->mount, '/') . '/' . $url;
-        }
+        // Wie ViteAutoHtml: lokale URLs immer relativ zum App-Prefix auflösen.
+        $url = rtrim($this->assetMount, '/') . '/' . ltrim($url, '/');
         $path = parse_url($url, PHP_URL_PATH);
         if (!is_string($path) || $path === '') {
             return null;
@@ -766,11 +774,26 @@ final class SpaStaticFileServerMw extends BraceAbstractMiddleware
         return phore_uri('/' . $mount)->formatUri(trailingSlash: false);
     }
 
+    private function matchesExcludedPath(string $path, string $pattern): bool
+    {
+        $subtree = str_ends_with($pattern, '/**');
+        if ($subtree) {
+            $pattern = substr($pattern, 0, -3);
+        }
+        $regex = str_replace(
+            ['\*\*', '\*'],
+            ['.*', '[^/]*'],
+            preg_quote($pattern, '~'),
+        );
+        if ($subtree) {
+            $regex .= '(?:/.*)?';
+        }
+        return preg_match('~\\A' . $regex . '\\z~D', $path) === 1;
+    }
+
     private function resolveExcludedPath(string $path): string
     {
-        if (str_starts_with($path, '/')) {
-            return $this->normalizeMount($path);
-        }
-        return phore_uri(rtrim($this->mount, '/') . '/' . $path)->formatUri(trailingSlash: false);
+        $resolved = rtrim($this->assetMount, '/') . '/' . ltrim($path, '/');
+        return phore_uri($resolved)->formatUri(trailingSlash: str_ends_with($path, '/')) ?: '/';
     }
 }
