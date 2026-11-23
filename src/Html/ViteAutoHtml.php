@@ -28,6 +28,7 @@ final class ViteAutoHtml extends HtmlGenerator
      * @param list<string> $additionalCss
      * @param list<string> $additionalJavascript
      * @param string|null $startHtml Trusted application HTML inserted at the start of <body>.
+     * @param string|null $headHtml Trusted server-side HTML appended to <head>; never use untrusted input.
      */
     public function __construct(
         public ?bool $development = null,
@@ -42,6 +43,7 @@ final class ViteAutoHtml extends HtmlGenerator
         ?string $startHtml = null,
         public string $devViteClient = '/@vite/client',
         public ?string $devEntrypoint = '/src/main.ts',
+        ?string $headHtml = null,
     ) {
         $this->configuredMeta = $meta;
         $this->configuredApiBaseUrl = $apiBaseUrl;
@@ -50,7 +52,7 @@ final class ViteAutoHtml extends HtmlGenerator
         $this->additionalCss = $additionalCss;
         $this->additionalJavascript = $additionalJavascript;
 
-        parent::__construct(title: $title, startHtml: $startHtml);
+        parent::__construct(title: $title, startHtml: $startHtml, headHtml: $headHtml);
         $this->setApplicationUrls($url_prefix);
     }
 

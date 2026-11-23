@@ -12,6 +12,7 @@ class HtmlGenerator
      * @param list<string> $javascript
      * @param string|null $startHtml Trusted application HTML inserted at the start of <body>.
      * @param string $baseHref Document base URL for relative links and assets.
+     * @param string|null $headHtml Trusted server-side HTML appended to <head>; never use untrusted input.
      */
     public function __construct(
         public string $title = '',
@@ -20,6 +21,7 @@ class HtmlGenerator
         public array $javascript = [],
         public ?string $startHtml = null,
         public string $baseHref = '/',
+        public ?string $headHtml = null,
     ) {
     }
 
@@ -44,6 +46,11 @@ class HtmlGenerator
 
         foreach ($this->css as $href) {
             $head[] = sprintf('<link rel="stylesheet" href="%s">', $this->escape($href));
+        }
+
+        // Like startHtml, headHtml is explicitly trusted application configuration.
+        if ($this->headHtml !== null) {
+            $head[] = $this->headHtml;
         }
 
         $body = [];
