@@ -84,6 +84,32 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
         $this->load()->shouldReturn(false);
     }
 
+    public function it_strips_only_complete_api_base_path_segments(): void
+    {
+        $this->beConstructedWith(
+            $this->targetFile,
+            new SchemaParser(),
+            new TypeScriptApiStubGenerator(),
+            new GeneratedFileWriter(),
+            'spa-api-build',
+            '/api/',
+        );
+        $app = $this->app(url_prefix: '/wurst');
+        $app->router->on('GET@/api', static fn (): string => 'ok', [], 'Api.Root');
+        $app->router->on('GET@/api/users/', static fn (): string => 'ok', [], 'Api.Users');
+        $app->router->on('GET@/apiv2/users', static fn (): string => 'ok', [], 'Api.Other');
+        $this->register($app);
+        $this->load()->shouldReturn(true);
+        $generated = file_get_contents($this->targetFile);
+
+        if ($generated === false
+            || !str_contains($generated, '"Api.Root": ["GET", "/"]')
+            || !str_contains($generated, '"Api.Users": ["GET", "/users/"]')
+            || !str_contains($generated, '"Api.Other": ["GET", "/apiv2/users"]')) {
+            throw new RuntimeException('API base path stripping did not preserve route boundaries.');
+        }
+    }
+
     public function it_generates_an_interface_for_a_controller_return_type(): void
     {
         $app = $this->app();

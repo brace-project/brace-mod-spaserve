@@ -25,7 +25,8 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         private readonly SchemaParser $schemaParser = new SchemaParser(),
         private readonly TypeScriptApiStubGenerator $generator = new TypeScriptApiStubGenerator(),
         private readonly GeneratedFileWriter $writer = new GeneratedFileWriter(),
-        private readonly string $commandName = 'spa-api-build'
+        private readonly string $commandName = 'spa-api-build',
+        private readonly string $apiBasePath = '',
     ) {
     }
 
@@ -60,6 +61,7 @@ final class TypeScriptApiGeneratorModule implements BraceModule
         foreach ($this->app->router->getNamedRoutes() as $route) {
             [$methods, $path] = explode('@', $route['route'], 2);
             $path = $this->stripPathPrefix($path, $routerPrefix);
+            $path = $this->stripPathPrefix($path, $this->apiBasePath);
             $path = preg_replace_callback('/::?([A-Za-z_][A-Za-z0-9_]*)/', static fn (array $match): string => '{' . $match[1] . '}', $path) ?? $path;
             $function = $this->parseCallback($route['call']);
             $queryResolver = new \Brace\Router\QueryParameterResolver();
@@ -110,18 +112,15 @@ final class TypeScriptApiGeneratorModule implements BraceModule
 
     private function stripPathPrefix(string $path, string $prefix): string
     {
+        $prefix = rtrim($prefix, '/');
         if (
             $prefix === ''
-            || $prefix === '/'
             || ($path !== $prefix && !str_starts_with($path, $prefix . '/'))
         ) {
             return $path;
         }
 
-        // Segmentgrenzen zuerst prüfen, dann relative URL-Form erzeugen.
-        return phore_uri($path)
-            ->rel($prefix)
-            ->formatUri(leadingSlash: true, trailingSlash: str_ends_with($path, '/'));
+        return substr($path, strlen($prefix)) ?: '/';
     }
 
     private function parseCallback(mixed $callback): FunctionSchema
