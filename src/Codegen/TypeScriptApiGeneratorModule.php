@@ -138,14 +138,19 @@ final class TypeScriptApiGeneratorModule implements BraceModule
     /** @param array<string,ClassSchema> $classes */
     private function collectClasses(SchemaType $type, array &$classes, ?string $nativeType = null): void
     {
-        if ($type instanceof ClassSchema) { $classes[$type->className] = $type; return; }
+        if ($type instanceof ClassSchema) {
+            if (isset($classes[$type->className])) return;
+            $classes[$type->className] = $type;
+            foreach ($type->properties as $property) $this->collectClasses($property->type, $classes, $property->nativeType);
+            return;
+        }
         if ($type instanceof ClassReferenceSchemaType) {
             $class = $type->className;
             if (!class_exists($class) && $nativeType !== null && class_exists($nativeType)) $class = $nativeType;
             if ($class !== '' && class_exists($class) && !isset($classes[$class])) {
                 $schema = $this->schemaParser->parseClass($class);
                 $classes[$class] = $schema;
-                foreach ($schema->properties as $property) $this->collectClasses($property->type, $classes);
+                foreach ($schema->properties as $property) $this->collectClasses($property->type, $classes, $property->nativeType);
             }
             return;
         }

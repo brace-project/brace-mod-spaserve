@@ -97,6 +97,20 @@ final class TypeScriptApiGeneratorModuleSpec extends ObjectBehavior
         }
     }
 
+    public function it_generates_nested_dto_interfaces(): void
+    {
+        $app = $this->app();
+        $app->router->on('GET@/api/nested', static fn (): StubNestedResponse => new StubNestedResponse(), [], 'Nested.Get');
+        $this->register($app);
+        $this->load()->shouldReturn(true);
+        $generated = file_get_contents($this->targetFile);
+        foreach (['StubNestedResponse', 'StubResponse'] as $name) {
+            if ($generated === false || !str_contains($generated, 'export interface ' . $name)) {
+                throw new RuntimeException('Missing nested DTO interface: ' . $name);
+            }
+        }
+    }
+
     public function it_generates_a_typed_post_body_and_response(): void
     {
         $app = $this->app();
@@ -150,6 +164,13 @@ final class StubController
 {
     /** @return StubResponse Generated response. */
     public function get(): StubResponse { return new StubResponse(); }
+}
+
+final class StubNestedResponse
+{
+    /** @var list<StubResponse> */
+    public array $items;
+    public StubResponse $item;
 }
 
 final class StubResponse
